@@ -1,0 +1,292 @@
+import sqlite3
+from pathlib import Path
+
+from app.models.receipt import Receipt
+
+
+class DataManager:
+    def __init__(self, db_path="data/receipify.db"):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.create_tables()
+        self.create_default_user()
+
+    def connect(self):
+        connection = sqlite3.connect(self.db_path)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return connection
+
+    def create_tables(self):
+        with self.connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS merchants (
+                    merchant_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    merchant_name TEXT UNIQUE NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS categories (
+                    category_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category_name TEXT UNIQUE NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS receipts (
+                    receipt_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    merchant_id INTEGER NOT NULL,
+                    category_id INTEGER NOT NULL,
+                    product_name TEXT NOT NULL,
+                    price_cents INTEGER NOT NULL DEFAULT 0,
+                    purchase_date TEXT NOT NULL,
+                    warranty_days INTEGER NOT NULL DEFAULT 0,
+                    return_days INTEGER NOT NULL DEFAULT 0,
+                    image_path TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id),
+                    FOREIGN KEY (merchant_id) REFERENCES merchants(merchant_id),
+                    FOREIGN KEY (category_id) REFERENCES categories(category_id)
+                )
+                """
+            )
+
+    def create_default_user(self):
+        with self.connect() as connection:
+            existing_user = connection.execute(
+                "SELECT user_id FROM users LIMIT 1"
+            ).fetchone()
+
+            if existing_user is None:
+                connection.execute(
+                    """
+                    INSERT INTO users (user_id, username, password_hash)
+                    VALUES (?, ?, ?)
+                    """,
+                    (1, "default_user", "not_used_yet"),
+                )
+
+    def get_or_create_merchant(self, merchant_name):
+        merchant_name = merchant_name.strip()
+
+        with self.connect() as connection:
+            existing_merchant = connection.execute(
+                "SELECT merchant_id FROM merchants WHERE merchant_name = ?",
+                (merchant_name,),
+            ).fetchone()
+
+            if existing_merchant:
+                return existing_merchant["merchant_id"]
+
+            cursor = connection.execute(
+                "INSERT INTO merchants (merchant_name) VALUES (?)",
+                (merchant_name,),
+            )
+            return cursor.lastrowid
+
+    def get_or_create_category(self, category_name):
+        category_name = category_name.strip()
+
+        with self.connect() as connection:
+            existing_category = connection.execute(
+                "SELECT category_id FROM categories WHERE category_name = ?",
+                (category_name,),
+            ).fetchone()
+
+            if existing_category:
+                return existing_category["category_id"]
+
+            cursor = connection.execute(
+                "INSERT INTO categories (category_name) VALUES (?)",
+                (category_name,),
+            )
+            return cursor.lastrowid
+
+    def add_receipt(
+        self,
+        product_name,
+        merchant_name,
+        category_name,
+        price_cents,
+        purchase_date,
+        warranty_days=0,
+        return_days=0,
+        image_path=None,
+        user_id=1,
+    ):
+        merchant_id = self.get_or_create_merchant(merchant_name)
+        category_id = self.get_or_create_category(category_name)
+
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO receipts (
+                    user_id,
+                    merchant_id,
+                    category_id,
+                    product_name,
+                    price_cents,
+                    purchase_date,
+                    warranty_days,
+                    return_days,
+                    image_path
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    merchant_id,
+                    category_id,
+                    product_name,
+                    price_cents,
+                    purchase_date,
+                    warranty_days,
+                    return_days,
+                    image_path,
+                ),
+            )
+            return cursor.lastrowid
+
+    def get_all_receipts(self, user_id=1):
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    receipts.receipt_id,
+                    receipts.user_id,
+                    receipts.product_name,
+                    merchants.merchant_name,
+                    categories.category_name,
+                    receipts.price_cents,
+                    receipts.purchase_date,
+                    receipts.warranty_days,
+                    receipts.return_days,
+                    receipts.image_path,
+                    receipts.created_at
+                FROM receipts
+                JOIN merchants ON receipts.merchant_id = merchants.merchant_id
+                JOIN categories ON receipts.category_id = categories.category_id
+                WHERE receipts.user_id = ?
+                ORDER BY receipts.purchase_date DESC, receipts.receipt_id DESC
+                """,
+                (user_id,),
+            ).fetchall()
+
+        return [self.row_to_receipt(row) for row in rows]
+
+    def search_receipts(self, user_id, query):
+        search_text = f"%{query.strip()}%"
+
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    receipts.receipt_id,
+                    receipts.user_id,
+                    receipts.product_name,
+                    merchants.merchant_name,
+                    categories.category_name,
+                    receipts.price_cents,
+                    receipts.purchase_date,
+                    receipts.warranty_days,
+                    receipts.return_days,
+                    receipts.image_path,
+                    receipts.created_at
+                FROM receipts
+                JOIN merchants ON receipts.merchant_id = merchants.merchant_id
+                JOIN categories ON receipts.category_id = categories.category_id
+                WHERE receipts.user_id = ?
+                    AND (
+                        receipts.product_name LIKE ?
+                        OR merchants.merchant_name LIKE ?
+                        OR categories.category_name LIKE ?
+                    )
+                ORDER BY receipts.purchase_date DESC, receipts.receipt_id DESC
+                """,
+                (user_id, search_text, search_text, search_text),
+            ).fetchall()
+
+        return [self.row_to_receipt(row) for row in rows]
+
+    def update_receipt(
+        self,
+        receipt_id,
+        product_name,
+        merchant_name,
+        category_name,
+        price_cents,
+        purchase_date,
+        warranty_days,
+        return_days,
+        image_path=None,
+        user_id=1,
+    ):
+        merchant_id = self.get_or_create_merchant(merchant_name)
+        category_id = self.get_or_create_category(category_name)
+
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE receipts
+                SET
+                    merchant_id = ?,
+                    category_id = ?,
+                    product_name = ?,
+                    price_cents = ?,
+                    purchase_date = ?,
+                    warranty_days = ?,
+                    return_days = ?,
+                    image_path = ?
+                WHERE receipt_id = ? AND user_id = ?
+                """,
+                (
+                    merchant_id,
+                    category_id,
+                    product_name,
+                    price_cents,
+                    purchase_date,
+                    warranty_days,
+                    return_days,
+                    image_path,
+                    receipt_id,
+                    user_id,
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def delete_receipt(self, receipt_id, user_id=1):
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM receipts WHERE receipt_id = ? AND user_id = ?",
+                (receipt_id, user_id),
+            )
+            return cursor.rowcount > 0
+
+    def row_to_receipt(self, row):
+        return Receipt(
+            receipt_id=row["receipt_id"],
+            user_id=row["user_id"],
+            product_name=row["product_name"],
+            merchant_name=row["merchant_name"],
+            category_name=row["category_name"],
+            price_cents=row["price_cents"],
+            purchase_date=row["purchase_date"],
+            warranty_days=row["warranty_days"],
+            return_days=row["return_days"],
+            image_path=row["image_path"],
+            created_at=row["created_at"],
+        )
