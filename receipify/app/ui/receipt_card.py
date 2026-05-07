@@ -11,15 +11,15 @@ class ReceiptCard(QFrame):
 
     def build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 18, 22, 18)
-        layout.setSpacing(14)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(18)
 
         header_layout = QHBoxLayout()
-        header_layout.setSpacing(16)
+        header_layout.setSpacing(18)
         layout.addLayout(header_layout)
 
         title_area = QVBoxLayout()
-        title_area.setSpacing(4)
+        title_area.setSpacing(6)
         header_layout.addLayout(title_area, stretch=1)
 
         product_name = QLabel(self.receipt.product_name)
@@ -28,9 +28,9 @@ class ReceiptCard(QFrame):
         title_area.addWidget(product_name)
 
         merchant_line = QLabel(
-            f"{self.receipt.merchant_name}  |  {self.receipt.category_name}"
+            f"{self.receipt.merchant_name}  -  {self.receipt.category_name}"
         )
-        merchant_line.setObjectName("cardSubtitle")
+        merchant_line.setObjectName("cardMeta")
         merchant_line.setWordWrap(True)
         title_area.addWidget(merchant_line)
 
@@ -40,35 +40,34 @@ class ReceiptCard(QFrame):
         header_layout.addWidget(price)
 
         details = QGridLayout()
-        details.setHorizontalSpacing(22)
+        details.setHorizontalSpacing(28)
         details.setVerticalSpacing(8)
         layout.addLayout(details)
 
         self.add_detail(details, 0, 0, "Purchase date", self.receipt.purchase_date)
-        self.add_detail(
-            details,
-            0,
-            1,
-            "Warranty expiry",
-            self.receipt.warranty_expiry_date() or "No warranty period",
-        )
-        self.add_detail(
-            details,
-            1,
-            0,
-            "Return expiry",
-            self.receipt.return_expiry_date() or "No return period",
-        )
 
-        badges = QWidget()
-        badge_layout = QHBoxLayout(badges)
-        badge_layout.setContentsMargins(0, 2, 0, 0)
-        badge_layout.setSpacing(8)
+        status_layout = QHBoxLayout()
+        status_layout.setSpacing(12)
+        layout.addLayout(status_layout)
 
-        badge_layout.addWidget(self.create_badge("Warranty", self.receipt.warranty_status()))
-        badge_layout.addWidget(self.create_badge("Return", self.receipt.return_status()))
-        badge_layout.addStretch(1)
-        layout.addWidget(badges)
+        status_layout.addWidget(
+            self.create_status_block(
+                "Warranty",
+                self.receipt.warranty_status(),
+                self.receipt.warranty_expiry_date(),
+                self.receipt.days_until_warranty_expiry(),
+            ),
+            stretch=1,
+        )
+        status_layout.addWidget(
+            self.create_status_block(
+                "Return",
+                self.receipt.return_status(),
+                self.receipt.return_expiry_date(),
+                self.receipt.days_until_return_expiry(),
+            ),
+            stretch=1,
+        )
 
     def add_detail(self, layout, row, column, label_text, value_text):
         detail = QWidget()
@@ -88,8 +87,53 @@ class ReceiptCard(QFrame):
         layout.addWidget(detail, row, column)
 
     def create_badge(self, prefix, status):
-        badge = QLabel(f"{prefix}: {status['label']}")
+        badge = QLabel(self.clean_status_label(status["label"]))
         badge.setObjectName("statusBadge")
         badge.setProperty("statusColor", status["color"])
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         return badge
+
+    def create_status_block(self, label_text, status, expiry_date, days_remaining):
+        block = QFrame()
+        block.setObjectName("statusBlock")
+
+        layout = QVBoxLayout(block)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(8)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(8)
+        layout.addLayout(top_row)
+
+        label = QLabel(label_text)
+        label.setObjectName("statusLabel")
+        top_row.addWidget(label, stretch=1)
+        top_row.addWidget(self.create_badge(label_text, status))
+
+        date_label = QLabel(f"Expiry: {expiry_date}" if expiry_date else "Expiry: None")
+        date_label.setObjectName("statusDate")
+        layout.addWidget(date_label)
+
+        days_label = QLabel(self.days_text(days_remaining))
+        days_label.setObjectName("statusDays")
+        layout.addWidget(days_label)
+
+        return block
+
+    def clean_status_label(self, status_label):
+        if status_label.startswith("no "):
+            return "None"
+
+        return status_label.capitalize()
+
+    def days_text(self, days_remaining):
+        if days_remaining is None:
+            return "Not tracked"
+
+        if days_remaining < 0:
+            return f"Expired {abs(days_remaining)} days ago"
+
+        if days_remaining == 0:
+            return "Expires today"
+
+        return f"{days_remaining} days remaining"
