@@ -3,6 +3,12 @@ from pathlib import Path
 
 from app.models.receipt import Receipt
 from app.paths import DATABASE_PATH
+from app.services.auth_service import (
+    hash_password,
+    is_usable_hash,
+    validate_credentials,
+    verify_password,
+)
 from app.services.settings_service import DEFAULT_SETTINGS, validate_settings
 
 
@@ -100,6 +106,103 @@ class DataManager:
                     """,
                     (1, "default_user", "not_used_yet"),
                 )
+
+    def get_user_by_username(self, username):
+        with self.connect() as connection:
+            return connection.execute(
+                """
+                SELECT user_id, username, password_hash
+                FROM users
+                WHERE username = ? COLLATE NOCASE
+                """,
+                (str(username).strip(),),
+            ).fetchone()
+
+    def count_claimed_accounts(self):
+        """Accounts with a usable password hash, i.e. excluding the seeded placeholder."""
+        with self.connect() as connection:
+            rows = connection.execute("SELECT password_hash FROM users").fetchall()
+
+        return sum(1 for row in rows if is_usable_hash(row["password_hash"]))
+
+    def authenticate_user(self, username, password):
+        user = self.get_user_by_username(username)
+        if user is None:
+            return None
+
+        if not verify_password(password, user["password_hash"]):
+            return None
+
+        return user["user_id"]
+
+    def register_user(self, username, password):
+        """Create an account: the first registration claims the seeded legacy account."""
+        claimed_user_id = self.claim_unclaimed_account(username, password)
+        if claimed_user_id is not None:
+            return claimed_user_id
+
+        return self.create_user(username, password)
+
+    def create_user(self, username, password):
+        values = self.clean_credentials(username, password)
+
+        if self.get_user_by_username(values["username"]) is not None:
+            raise ValueError("That username is already taken.")
+
+        try:
+            with self.connect() as connection:
+                cursor = connection.execute(
+                    "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+                    (values["username"], hash_password(values["password"])),
+                )
+                return cursor.lastrowid
+        except sqlite3.IntegrityError as error:
+            raise ValueError("That username is already taken.") from error
+
+    def claim_unclaimed_account(self, username, password):
+        """Give the seeded account real credentials, keeping its user_id and data.
+
+        Only applies on genuine first run, so a later registration can never
+        inherit the receipts already attached to the seeded account.
+        """
+        if self.count_claimed_accounts() > 0:
+            return None
+
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT user_id, password_hash FROM users ORDER BY user_id"
+            ).fetchall()
+
+        unclaimed_user = next(
+            (row for row in rows if not is_usable_hash(row["password_hash"])), None
+        )
+        if unclaimed_user is None:
+            return None
+
+        values = self.clean_credentials(username, password)
+        existing_user = self.get_user_by_username(values["username"])
+        if existing_user is not None and existing_user["user_id"] != unclaimed_user["user_id"]:
+            raise ValueError("That username is already taken.")
+
+        with self.connect() as connection:
+            connection.execute(
+                "UPDATE users SET username = ?, password_hash = ? WHERE user_id = ?",
+                (
+                    values["username"],
+                    hash_password(values["password"]),
+                    unclaimed_user["user_id"],
+                ),
+            )
+
+        return unclaimed_user["user_id"]
+
+    @staticmethod
+    def clean_credentials(username, password):
+        is_valid, errors, values = validate_credentials(username, password)
+        if not is_valid:
+            raise ValueError(" ".join(errors))
+
+        return values
 
     def get_or_create_merchant(self, merchant_name):
         merchant_name = merchant_name.strip()

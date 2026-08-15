@@ -1,4 +1,4 @@
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -23,13 +23,17 @@ from app.ui.styles import app_stylesheet
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, data_manager=None):
+    logged_out = pyqtSignal()
+    closed = pyqtSignal()
+
+    def __init__(self, data_manager=None, user_id=1, username=None):
         super().__init__()
-        self.user_id = 1
+        self.user_id = user_id
+        self.username = username
         self.data_manager = data_manager or DataManager()
         self.receipt_cards = []
 
-        self.setWindowTitle("Receipify")
+        self.setWindowTitle(f"Receipify - {username}" if username else "Receipify")
         self.resize(1040, 760)
         self.setMinimumSize(820, 560)
         self.build_ui()
@@ -92,6 +96,15 @@ class MainWindow(QMainWindow):
             )
             navigation_layout.addWidget(button)
             self.navigation_buttons[page_name] = button
+
+        self.logout_button = QPushButton("Log out")
+        self.logout_button.setObjectName("navButton")
+        self.logout_button.clicked.connect(self.logged_out.emit)
+        navigation_layout.addWidget(self.logout_button)
+
+    def closeEvent(self, event):
+        self.closed.emit()
+        super().closeEvent(event)
 
     def build_receipts_page(self):
         page = QWidget()
