@@ -1,11 +1,34 @@
+from pathlib import Path
+
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtGui import QPixmap
+from PyQt6.QtWidgets import (
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class ReceiptCard(QFrame):
-    def __init__(self, receipt, parent=None):
+    def __init__(
+        self,
+        receipt,
+        on_edit=None,
+        on_delete=None,
+        warranty_warning_threshold=30,
+        return_warning_threshold=7,
+        parent=None,
+    ):
         super().__init__(parent)
         self.receipt = receipt
+        self.on_edit = on_edit
+        self.on_delete = on_delete
+        self.warranty_warning_threshold = warranty_warning_threshold
+        self.return_warning_threshold = return_warning_threshold
         self.setObjectName("receiptCard")
         self.build_ui()
 
@@ -17,6 +40,13 @@ class ReceiptCard(QFrame):
         header_layout = QHBoxLayout()
         header_layout.setSpacing(18)
         layout.addLayout(header_layout)
+
+        self.image_label = QLabel()
+        self.image_label.setObjectName("receiptImage")
+        self.image_label.setFixedSize(96, 72)
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.set_receipt_image()
+        header_layout.addWidget(self.image_label)
 
         title_area = QVBoxLayout()
         title_area.setSpacing(6)
@@ -53,7 +83,7 @@ class ReceiptCard(QFrame):
         status_layout.addWidget(
             self.create_status_block(
                 "Warranty",
-                self.receipt.warranty_status(),
+                self.receipt.warranty_status(self.warranty_warning_threshold),
                 self.receipt.warranty_expiry_date(),
                 self.receipt.days_until_warranty_expiry(),
             ),
@@ -62,12 +92,53 @@ class ReceiptCard(QFrame):
         status_layout.addWidget(
             self.create_status_block(
                 "Return",
-                self.receipt.return_status(),
+                self.receipt.return_status(self.return_warning_threshold),
                 self.receipt.return_expiry_date(),
                 self.receipt.days_until_return_expiry(),
             ),
             stretch=1,
         )
+
+        actions_layout = QHBoxLayout()
+        actions_layout.addStretch(1)
+        layout.addLayout(actions_layout)
+
+        self.edit_button = QPushButton("Edit")
+        self.edit_button.setObjectName("secondaryButton")
+        self.edit_button.clicked.connect(self.handle_edit)
+        actions_layout.addWidget(self.edit_button)
+
+        self.delete_button = QPushButton("Delete")
+        self.delete_button.setObjectName("dangerButton")
+        self.delete_button.clicked.connect(self.handle_delete)
+        actions_layout.addWidget(self.delete_button)
+
+    def set_receipt_image(self):
+        if not self.receipt.image_path:
+            self.image_label.setText("No image")
+            return
+
+        image_path = Path(self.receipt.image_path)
+        pixmap = QPixmap(str(image_path)) if image_path.is_file() else QPixmap()
+        if pixmap.isNull():
+            self.image_label.setText("Image\nunavailable")
+            return
+
+        self.image_label.setPixmap(
+            pixmap.scaled(
+                self.image_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+
+    def handle_edit(self):
+        if self.on_edit is not None:
+            self.on_edit(self.receipt)
+
+    def handle_delete(self):
+        if self.on_delete is not None:
+            self.on_delete(self.receipt)
 
     def add_detail(self, layout, row, column, label_text, value_text):
         detail = QWidget()

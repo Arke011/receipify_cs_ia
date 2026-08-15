@@ -2,6 +2,7 @@ import sqlite3
 from pathlib import Path
 
 from app.models.receipt import Receipt
+from app.services.settings_service import DEFAULT_SETTINGS, validate_settings
 
 
 class DataManager:
@@ -61,6 +62,18 @@ class DataManager:
                     FOREIGN KEY (user_id) REFERENCES users(user_id),
                     FOREIGN KEY (merchant_id) REFERENCES merchants(merchant_id),
                     FOREIGN KEY (category_id) REFERENCES categories(category_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS settings (
+                    user_id INTEGER PRIMARY KEY,
+                    default_warranty_days INTEGER NOT NULL,
+                    default_return_days INTEGER NOT NULL,
+                    warranty_warning_threshold INTEGER NOT NULL,
+                    return_warning_threshold INTEGER NOT NULL,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
                 )
                 """
             )
@@ -275,6 +288,63 @@ class DataManager:
                 (receipt_id, user_id),
             )
             return cursor.rowcount > 0
+
+    def get_settings(self, user_id=1):
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    default_warranty_days,
+                    default_return_days,
+                    warranty_warning_threshold,
+                    return_warning_threshold
+                FROM settings
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+
+        if row is None:
+            return DEFAULT_SETTINGS.copy()
+
+        return dict(row)
+
+    def save_settings(
+        self,
+        default_warranty_days,
+        default_return_days,
+        warranty_warning_threshold,
+        return_warning_threshold,
+        user_id=1,
+    ):
+        is_valid, errors, values = validate_settings(
+            default_warranty_days,
+            default_return_days,
+            warranty_warning_threshold,
+            return_warning_threshold,
+        )
+        if not is_valid:
+            raise ValueError(" ".join(errors))
+
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO settings (
+                    user_id,
+                    default_warranty_days,
+                    default_return_days,
+                    warranty_warning_threshold,
+                    return_warning_threshold
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    default_warranty_days = excluded.default_warranty_days,
+                    default_return_days = excluded.default_return_days,
+                    warranty_warning_threshold = excluded.warranty_warning_threshold,
+                    return_warning_threshold = excluded.return_warning_threshold
+                """,
+                (user_id, *values.values()),
+            )
 
     def row_to_receipt(self, row):
         return Receipt(

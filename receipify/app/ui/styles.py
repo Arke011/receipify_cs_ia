@@ -21,6 +21,12 @@ def app_stylesheet():
             letter-spacing: 0px;
         }
 
+        QLabel#appBrand {
+            color: #1E293B;
+            font-size: 20px;
+            font-weight: 800;
+        }
+
         QLabel#pageSubtitle,
         QLabel#dialogSubtitle,
         QLabel#cardMeta,
@@ -86,6 +92,24 @@ def app_stylesheet():
             border-color: #1D4ED8;
         }
 
+        QPushButton#navButton {
+            background-color: transparent;
+            border: 1px solid transparent;
+            color: #64748B;
+            min-width: 0;
+            padding: 8px 12px;
+        }
+
+        QPushButton#navButton:hover {
+            background-color: #EAF0F8;
+            color: #1E293B;
+        }
+
+        QPushButton#navButton:checked {
+            background-color: #E0EAFC;
+            color: #1D4ED8;
+        }
+
         QPushButton#secondaryButton {
             background-color: #FFFFFF;
             border: 1px solid #E2E8F0;
@@ -97,7 +121,23 @@ def app_stylesheet():
             background-color: #F8FAFC;
         }
 
+        QPushButton#dangerButton {
+            background-color: #FFFFFF;
+            border: 1px solid #FECACA;
+            color: #DC2626;
+            min-width: 96px;
+        }
+
+        QPushButton#dangerButton:hover {
+            background-color: #FEF2F2;
+        }
+
         QScrollArea#receiptScrollArea {
+            background-color: transparent;
+            border: none;
+        }
+
+        QScrollArea#dashboardScrollArea {
             background-color: transparent;
             border: none;
         }
@@ -106,11 +146,43 @@ def app_stylesheet():
             background-color: transparent;
         }
 
+        QWidget#dashboardContent {
+            background-color: transparent;
+        }
+
         QFrame#receiptCard,
-        QFrame#formContainer {
+        QFrame#formContainer,
+        QFrame#dashboardSummaryCard,
+        QFrame#dashboardPanel,
+        QFrame#exportPanel {
             background-color: #FFFFFF;
             border: 1px solid #E2E8F0;
             border-radius: 18px;
+        }
+
+        QLabel#dashboardMetricLabel,
+        QLabel#dashboardEmpty {
+            color: #64748B;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        QLabel#dashboardMetricValue {
+            color: #1E293B;
+            font-size: 24px;
+            font-weight: 800;
+        }
+
+        QLabel#dashboardPanelTitle {
+            color: #1E293B;
+            font-size: 16px;
+            font-weight: 800;
+        }
+
+        QLabel#dashboardItem {
+            color: #334155;
+            font-size: 13px;
+            padding: 5px 0;
         }
 
         QLabel#cardTitle {
@@ -124,6 +196,14 @@ def app_stylesheet():
             color: #1E293B;
             font-size: 19px;
             font-weight: 800;
+        }
+
+        QLabel#receiptImage {
+            background-color: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            border-radius: 10px;
+            color: #64748B;
+            font-size: 11px;
         }
 
         QLabel#detailLabel,
@@ -172,6 +252,12 @@ def app_stylesheet():
 
         QLabel#errorLabel {
             color: #DC2626;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        QLabel#successLabel {
+            color: #16A34A;
             font-size: 13px;
             font-weight: 700;
         }

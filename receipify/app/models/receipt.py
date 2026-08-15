@@ -36,21 +36,21 @@ class Receipt:
     def days_until_return_expiry(self) -> int | None:
         return days_until_iso_date(self.return_expiry_date())
 
-    def warranty_status(self) -> dict:
+    def warranty_status(self, warning_threshold=30) -> dict:
         return expiry_status(
             self.days_until_warranty_expiry(),
-            warning_threshold=30,
+            warning_threshold=warning_threshold,
             no_period_label="no warranty period",
         )
 
-    def return_status(self) -> dict:
+    def return_status(self, warning_threshold=7) -> dict:
         return expiry_status(
             self.days_until_return_expiry(),
-            warning_threshold=7,
+            warning_threshold=warning_threshold,
             no_period_label="no return period",
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(self, warranty_warning_threshold=30, return_warning_threshold=7) -> dict:
         return {
             "receipt_id": self.receipt_id,
             "user_id": self.user_id,
@@ -66,8 +66,8 @@ class Receipt:
             "return_expiry_date": self.return_expiry_date(),
             "days_until_warranty_expiry": self.days_until_warranty_expiry(),
             "days_until_return_expiry": self.days_until_return_expiry(),
-            "warranty_status": self.warranty_status(),
-            "return_status": self.return_status(),
+            "warranty_status": self.warranty_status(warranty_warning_threshold),
+            "return_status": self.return_status(return_warning_threshold),
             "image_path": self.image_path,
             "created_at": self.created_at,
         }

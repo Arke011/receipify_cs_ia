@@ -5,23 +5,28 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QScrollArea,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from app.data.data_manager import DataManager
+from app.ui.dashboard_page import DashboardPage
+from app.ui.export_page import ExportPage
 from app.ui.receipt_dialog import AddReceiptDialog
 from app.ui.receipt_card import ReceiptCard
+from app.ui.settings_page import SettingsPage
 from app.ui.styles import app_stylesheet
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, data_manager=None):
         super().__init__()
         self.user_id = 1
-        self.data_manager = DataManager()
+        self.data_manager = data_manager or DataManager()
         self.receipt_cards = []
 
         self.setWindowTitle("Receipify")
@@ -37,6 +42,61 @@ class MainWindow(QMainWindow):
 
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(44, 36, 44, 36)
+        main_layout.setSpacing(20)
+
+        self.build_navigation(main_layout)
+
+        self.page_stack = QStackedWidget()
+        main_layout.addWidget(self.page_stack, stretch=1)
+
+        self.dashboard_page = DashboardPage(self.data_manager, self.user_id)
+        self.export_page = ExportPage(self.data_manager, self.user_id)
+        self.settings_page = SettingsPage(
+            self.data_manager,
+            self.user_id,
+            on_settings_saved=self.refresh_settings_dependent_views,
+        )
+        self.pages = {
+            "Receipts": self.build_receipts_page(),
+            "Dashboard": self.dashboard_page,
+            "Export": self.export_page,
+            "Settings": self.settings_page,
+            "OCR Import": self.build_placeholder_page(
+                "OCR Import",
+                "OCR receipt importing is planned for a future update. No OCR processing is available yet.",
+            ),
+        }
+        for page in self.pages.values():
+            self.page_stack.addWidget(page)
+
+        self.show_page("Receipts")
+        self.setStyleSheet(app_stylesheet())
+
+    def build_navigation(self, main_layout):
+        navigation_layout = QHBoxLayout()
+        navigation_layout.setSpacing(8)
+        main_layout.addLayout(navigation_layout)
+
+        brand = QLabel("Receipify")
+        brand.setObjectName("appBrand")
+        navigation_layout.addWidget(brand)
+        navigation_layout.addStretch(1)
+
+        self.navigation_buttons = {}
+        for page_name in ("Receipts", "Dashboard", "Export", "Settings", "OCR Import"):
+            button = QPushButton(page_name)
+            button.setObjectName("navButton")
+            button.setCheckable(True)
+            button.clicked.connect(
+                lambda _checked=False, name=page_name: self.show_page(name)
+            )
+            navigation_layout.addWidget(button)
+            self.navigation_buttons[page_name] = button
+
+    def build_receipts_page(self):
+        page = QWidget()
+        main_layout = QVBoxLayout(page)
+        main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(20)
 
         header_layout = QHBoxLayout()
@@ -86,7 +146,33 @@ class MainWindow(QMainWindow):
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_label.setObjectName("emptyLabel")
 
-        self.setStyleSheet(app_stylesheet())
+        return page
+
+    def build_placeholder_page(self, title_text, message):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        title = QLabel(title_text)
+        title.setObjectName("pageTitle")
+        layout.addWidget(title)
+
+        subtitle = QLabel(message)
+        subtitle.setObjectName("pageSubtitle")
+        subtitle.setWordWrap(True)
+        layout.addWidget(subtitle)
+        layout.addStretch(1)
+        return page
+
+    def show_page(self, page_name):
+        self.page_stack.setCurrentWidget(self.pages[page_name])
+        if page_name == "Dashboard":
+            self.dashboard_page.refresh()
+        elif page_name == "Settings":
+            self.settings_page.load_settings()
+        for name, button in self.navigation_buttons.items():
+            button.setChecked(name == page_name)
 
     def load_receipts(self):
         receipts = self.data_manager.get_all_receipts(self.user_id)
@@ -110,8 +196,15 @@ class MainWindow(QMainWindow):
             self.gallery_layout.addStretch(1)
             return
 
+        settings = self.data_manager.get_settings(self.user_id)
         for receipt in receipts:
-            card = ReceiptCard(receipt)
+            card = ReceiptCard(
+                receipt,
+                on_edit=self.open_edit_receipt_dialog,
+                on_delete=self.confirm_delete_receipt,
+                warranty_warning_threshold=settings["warranty_warning_threshold"],
+                return_warning_threshold=settings["return_warning_threshold"],
+            )
             self.gallery_layout.addWidget(card)
             self.receipt_cards.append(card)
 
@@ -127,10 +220,43 @@ class MainWindow(QMainWindow):
         self.receipt_cards = []
 
     def open_add_receipt_dialog(self):
-        dialog = AddReceiptDialog(self)
+        settings = self.data_manager.get_settings(self.user_id)
+        dialog = AddReceiptDialog(
+            default_warranty_days=settings["default_warranty_days"],
+            default_return_days=settings["default_return_days"],
+            parent=self,
+        )
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
             values = dialog.cleaned_values
             self.data_manager.add_receipt(user_id=self.user_id, **values)
             self.search_bar.clear()
             self.load_receipts()
+
+    def open_edit_receipt_dialog(self, receipt):
+        dialog = AddReceiptDialog(receipt=receipt, parent=self)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.data_manager.update_receipt(
+                receipt_id=receipt.receipt_id,
+                user_id=self.user_id,
+                **dialog.cleaned_values,
+            )
+            self.filter_receipts()
+
+    def confirm_delete_receipt(self, receipt):
+        confirmation = QMessageBox.question(
+            self,
+            "Delete receipt",
+            f"Delete '{receipt.product_name}'? This action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if confirmation == QMessageBox.StandardButton.Yes:
+            self.data_manager.delete_receipt(receipt.receipt_id, user_id=self.user_id)
+            self.filter_receipts()
+
+    def refresh_settings_dependent_views(self):
+        self.filter_receipts()
+        self.dashboard_page.refresh()
