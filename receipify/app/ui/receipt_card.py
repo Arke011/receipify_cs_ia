@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
@@ -11,6 +9,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from app.services.image_service import resolve_image_path
 
 
 class ReceiptCard(QFrame):
@@ -118,7 +118,7 @@ class ReceiptCard(QFrame):
             self.image_label.setText("No image")
             return
 
-        image_path = Path(self.receipt.image_path)
+        image_path = resolve_image_path(self.receipt.image_path)
         pixmap = QPixmap(str(image_path)) if image_path.is_file() else QPixmap()
         if pixmap.isNull():
             self.image_label.setText("Image\nunavailable")

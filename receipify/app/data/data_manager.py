@@ -2,15 +2,23 @@ import sqlite3
 from pathlib import Path
 
 from app.models.receipt import Receipt
+from app.paths import DATABASE_PATH
 from app.services.settings_service import DEFAULT_SETTINGS, validate_settings
 
 
+LIKE_ESCAPE_CHARACTER = "\\"
+
+
 class DataManager:
-    def __init__(self, db_path="data/receipify.db"):
-        self.db_path = Path(db_path)
+    def __init__(self, db_path=None):
+        self.db_path = Path(db_path) if db_path is not None else self.default_database_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.create_tables()
         self.create_default_user()
+
+    @staticmethod
+    def default_database_path():
+        return DATABASE_PATH
 
     def connect(self):
         connection = sqlite3.connect(self.db_path)
@@ -202,7 +210,7 @@ class DataManager:
         return [self.row_to_receipt(row) for row in rows]
 
     def search_receipts(self, user_id, query):
-        search_text = f"%{query.strip()}%"
+        search_text = f"%{self.escape_like_pattern(query.strip())}%"
 
         with self.connect() as connection:
             rows = connection.execute(
@@ -224,9 +232,9 @@ class DataManager:
                 JOIN categories ON receipts.category_id = categories.category_id
                 WHERE receipts.user_id = ?
                     AND (
-                        receipts.product_name LIKE ?
-                        OR merchants.merchant_name LIKE ?
-                        OR categories.category_name LIKE ?
+                        receipts.product_name LIKE ? ESCAPE '\\'
+                        OR merchants.merchant_name LIKE ? ESCAPE '\\'
+                        OR categories.category_name LIKE ? ESCAPE '\\'
                     )
                 ORDER BY receipts.purchase_date DESC, receipts.receipt_id DESC
                 """,
@@ -345,6 +353,14 @@ class DataManager:
                 """,
                 (user_id, *values.values()),
             )
+
+    @staticmethod
+    def escape_like_pattern(query):
+        """Escape LIKE wildcards so '%' and '_' are searched for literally."""
+        for character in (LIKE_ESCAPE_CHARACTER, "%", "_"):
+            query = query.replace(character, LIKE_ESCAPE_CHARACTER + character)
+
+        return query
 
     def row_to_receipt(self, row):
         return Receipt(

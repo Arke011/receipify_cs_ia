@@ -2,6 +2,10 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 
+MAX_PERIOD_DAYS = 36500
+MAX_PRICE = Decimal("99999999.99")
+
+
 def validate_receipt_input(
     product_name,
     merchant_name,
@@ -32,11 +36,13 @@ def validate_receipt_input(
         warranty_days,
         "Warranty days",
         errors,
+        maximum=MAX_PERIOD_DAYS,
     )
     clean_return_days = _clean_non_negative_integer(
         return_days,
         "Return days",
         errors,
+        maximum=MAX_PERIOD_DAYS,
     )
 
     if not errors:
@@ -70,6 +76,10 @@ def _clean_price_to_cents(price, errors):
         errors.append("Price must be greater than or equal to 0.")
         return None
 
+    if price_value > MAX_PRICE:
+        errors.append("Price is too large.")
+        return None
+
     cents = (price_value * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     return int(cents)
 
@@ -84,7 +94,7 @@ def _clean_iso_date(date_text, errors):
     return parsed_date.isoformat()
 
 
-def _clean_non_negative_integer(value, field_name, errors):
+def _clean_non_negative_integer(value, field_name, errors, maximum=None):
     try:
         clean_value = int(str(value).strip())
     except ValueError:
@@ -93,6 +103,10 @@ def _clean_non_negative_integer(value, field_name, errors):
 
     if clean_value < 0:
         errors.append(f"{field_name} must be greater than or equal to 0.")
+        return None
+
+    if maximum is not None and clean_value > maximum:
+        errors.append(f"{field_name} must be {maximum} or fewer.")
         return None
 
     return clean_value

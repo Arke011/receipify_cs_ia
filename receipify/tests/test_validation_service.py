@@ -52,6 +52,69 @@ def test_validate_receipt_input_rejects_invalid_prices(price, expected_error):
     assert values == {}
 
 
+@pytest.mark.parametrize("price", ["1e400", "1E400", "9" * 400, "1e1000"])
+def test_validate_receipt_input_rejects_prices_too_large_to_convert(price):
+    """Decimal.quantize raises InvalidOperation on huge values; it must not escape."""
+    is_valid, errors, values = validate_receipt_input(
+        product_name="Mouse",
+        merchant_name="Store",
+        price=price,
+        purchase_date="2026-08-15",
+        warranty_days="0",
+        return_days="0",
+    )
+
+    assert is_valid is False
+    assert errors == ["Price is too large."]
+    assert values == {}
+
+
+@pytest.mark.parametrize(
+    ("field", "label"),
+    [("warranty_days", "Warranty days"), ("return_days", "Return days")],
+)
+@pytest.mark.parametrize("value", ["99999999", "3652060", str(10**12)])
+def test_validate_receipt_input_rejects_period_days_beyond_the_supported_range(
+    field, label, value
+):
+    """Values that overflow date arithmetic must be rejected at the input boundary."""
+    periods = {"warranty_days": "0", "return_days": "0"}
+    periods[field] = value
+
+    is_valid, errors, values = validate_receipt_input(
+        product_name="Mouse",
+        merchant_name="Store",
+        price="1",
+        purchase_date="2026-08-15",
+        **periods,
+    )
+
+    assert is_valid is False
+    assert errors == [f"{label} must be 36500 or fewer."]
+    assert values == {}
+
+
+@pytest.mark.parametrize(
+    ("field", "label"),
+    [("warranty_days", "Warranty days"), ("return_days", "Return days")],
+)
+def test_validate_receipt_input_accepts_the_maximum_supported_period(field, label):
+    periods = {"warranty_days": "0", "return_days": "0"}
+    periods[field] = "36500"
+
+    is_valid, errors, values = validate_receipt_input(
+        product_name="Mouse",
+        merchant_name="Store",
+        price="1",
+        purchase_date="2026-08-15",
+        **periods,
+    )
+
+    assert is_valid is True
+    assert errors == []
+    assert values[field] == 36500
+
+
 def test_validate_receipt_input_collects_field_errors():
     is_valid, errors, values = validate_receipt_input(
         product_name=" ",

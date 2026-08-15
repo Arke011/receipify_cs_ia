@@ -24,11 +24,23 @@ class Receipt:
     def price_euros(self) -> float:
         return self.price_cents / 100
 
+    def expiry_date(self, days: int) -> str | None:
+        """Expiry date for a stored period, or None if the stored data cannot produce one.
+
+        Validation keeps new receipts within range, but rows already in the
+        database may hold a malformed date or an out-of-range day count, and
+        those must not crash the gallery, dashboard, or export.
+        """
+        try:
+            return add_days_to_iso_date(self.purchase_date, days)
+        except (ValueError, OverflowError):
+            return None
+
     def warranty_expiry_date(self) -> str | None:
-        return add_days_to_iso_date(self.purchase_date, self.warranty_days)
+        return self.expiry_date(self.warranty_days)
 
     def return_expiry_date(self) -> str | None:
-        return add_days_to_iso_date(self.purchase_date, self.return_days)
+        return self.expiry_date(self.return_days)
 
     def days_until_warranty_expiry(self) -> int | None:
         return days_until_iso_date(self.warranty_expiry_date())

@@ -122,4 +122,8 @@ class SettingsPage(QWidget):
     def show_message(self, message, object_name):
         self.message_label.setText(message)
         self.message_label.setObjectName(object_name)
+        # Qt does not re-evaluate stylesheet selectors when objectName changes,
+        # so the widget has to be repolished for the new rule to take effect.
+        self.message_label.style().unpolish(self.message_label)
+        self.message_label.style().polish(self.message_label)
         self.message_label.show()

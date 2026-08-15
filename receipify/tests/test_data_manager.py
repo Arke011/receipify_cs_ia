@@ -44,6 +44,33 @@ def test_add_and_search_receipts(data_manager):
     ]
 
 
+def test_search_treats_like_wildcards_as_literal_characters(data_manager):
+    add_sample_receipt(data_manager)
+    add_sample_receipt(data_manager, product_name="Keyboard", merchant_name="Office Shop")
+    add_sample_receipt(data_manager, product_name="100% Cotton Towel")
+    add_sample_receipt(data_manager, product_name="Snap_On Wrench")
+
+    assert [receipt.product_name for receipt in data_manager.search_receipts(1, "%")] == [
+        "100% Cotton Towel"
+    ]
+    assert [receipt.product_name for receipt in data_manager.search_receipts(1, "_")] == [
+        "Snap_On Wrench"
+    ]
+    assert data_manager.search_receipts(1, "%%%") == []
+    assert [
+        receipt.product_name for receipt in data_manager.search_receipts(1, "100%")
+    ] == ["100% Cotton Towel"]
+
+
+def test_search_treats_the_escape_character_as_literal(data_manager):
+    add_sample_receipt(data_manager, product_name="Back\\Slash Tool")
+    add_sample_receipt(data_manager, product_name="Plain Tool")
+
+    assert [
+        receipt.product_name for receipt in data_manager.search_receipts(1, "\\")
+    ] == ["Back\\Slash Tool"]
+
+
 def test_update_receipt_replaces_receipt_details(data_manager):
     receipt_id = add_sample_receipt(data_manager)
 
