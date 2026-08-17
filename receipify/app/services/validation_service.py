@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 
@@ -72,8 +72,8 @@ def _clean_price_to_cents(price, errors):
         errors.append("Price must be numeric.")
         return None
 
-    if price_value < Decimal("0"):
-        errors.append("Price must be greater than or equal to 0.")
+    if price_value <= Decimal("0"):
+        errors.append("Price must be greater than 0.")
         return None
 
     if price_value > MAX_PRICE:
@@ -89,6 +89,10 @@ def _clean_iso_date(date_text, errors):
         parsed_date = datetime.strptime(date_text, "%Y-%m-%d").date()
     except ValueError:
         errors.append("Purchase date must be a valid date in YYYY-MM-DD format.")
+        return None
+
+    if parsed_date > date.today():
+        errors.append("Purchase date cannot be in the future.")
         return None
 
     return parsed_date.isoformat()

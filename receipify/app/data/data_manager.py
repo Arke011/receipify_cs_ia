@@ -1,9 +1,11 @@
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from app.models.receipt import Receipt
 from app.paths import DATABASE_PATH
 from app.services.auth_service import (
+    dummy_password_hash,
     hash_password,
     is_usable_hash,
     validate_credentials,
@@ -13,6 +15,11 @@ from app.services.settings_service import DEFAULT_SETTINGS, validate_settings
 
 
 LIKE_ESCAPE_CHARACTER = "\\"
+
+# A second instance, or an open database browser, can hold a write lock briefly.
+# Waiting is better than failing the user's action immediately.
+CONNECTION_TIMEOUT_SECONDS = 10.0
+BUSY_TIMEOUT_MILLISECONDS = 10000
 
 
 class DataManager:
@@ -27,13 +34,15 @@ class DataManager:
         return DATABASE_PATH
 
     def connect(self):
-        connection = sqlite3.connect(self.db_path)
+        """Open a connection. Callers must close it, normally via ``closing``."""
+        connection = sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT_SECONDS)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MILLISECONDS}")
         return connection
 
     def create_tables(self):
-        with self.connect() as connection:
+        with closing(self.connect()) as connection, connection:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS users (
@@ -93,7 +102,7 @@ class DataManager:
             )
 
     def create_default_user(self):
-        with self.connect() as connection:
+        with closing(self.connect()) as connection, connection:
             existing_user = connection.execute(
                 "SELECT user_id FROM users LIMIT 1"
             ).fetchone()
@@ -108,7 +117,7 @@ class DataManager:
                 )
 
     def get_user_by_username(self, username):
-        with self.connect() as connection:
+        with closing(self.connect()) as connection:
             return connection.execute(
                 """
                 SELECT user_id, username, password_hash
@@ -120,7 +129,7 @@ class DataManager:
 
     def count_claimed_accounts(self):
         """Accounts with a usable password hash, i.e. excluding the seeded placeholder."""
-        with self.connect() as connection:
+        with closing(self.connect()) as connection:
             rows = connection.execute("SELECT password_hash FROM users").fetchall()
 
         return sum(1 for row in rows if is_usable_hash(row["password_hash"]))
@@ -128,6 +137,9 @@ class DataManager:
     def authenticate_user(self, username, password):
         user = self.get_user_by_username(username)
         if user is None:
+            # Spend the same hashing work an existing account would, so the
+            # response time cannot be used to discover which usernames exist.
+            verify_password(password, dummy_password_hash())
             return None
 
         if not verify_password(password, user["password_hash"]):
@@ -150,7 +162,7 @@ class DataManager:
             raise ValueError("That username is already taken.")
 
         try:
-            with self.connect() as connection:
+            with closing(self.connect()) as connection, connection:
                 cursor = connection.execute(
                     "INSERT INTO users (username, password_hash) VALUES (?, ?)",
                     (values["username"], hash_password(values["password"])),
@@ -168,7 +180,7 @@ class DataManager:
         if self.count_claimed_accounts() > 0:
             return None
 
-        with self.connect() as connection:
+        with closing(self.connect()) as connection:
             rows = connection.execute(
                 "SELECT user_id, password_hash FROM users ORDER BY user_id"
             ).fetchall()
@@ -184,7 +196,7 @@ class DataManager:
         if existing_user is not None and existing_user["user_id"] != unclaimed_user["user_id"]:
             raise ValueError("That username is already taken.")
 
-        with self.connect() as connection:
+        with closing(self.connect()) as connection, connection:
             connection.execute(
                 "UPDATE users SET username = ?, password_hash = ? WHERE user_id = ?",
                 (
@@ -207,7 +219,7 @@ class DataManager:
     def get_or_create_merchant(self, merchant_name):
         merchant_name = merchant_name.strip()
 
-        with self.connect() as connection:
+        with closing(self.connect()) as connection, connection:
             existing_merchant = connection.execute(
                 "SELECT merchant_id FROM merchants WHERE merchant_name = ?",
                 (merchant_name,),
@@ -225,7 +237,7 @@ class DataManager:
     def get_or_create_category(self, category_name):
         category_name = category_name.strip()
 
-        with self.connect() as connection:
+        with closing(self.connect()) as connection, connection:
             existing_category = connection.execute(
                 "SELECT category_id FROM categories WHERE category_name = ?",
                 (category_name,),
@@ -255,7 +267,7 @@ class DataManager:
         merchant_id = self.get_or_create_merchant(merchant_name)
         category_id = self.get_or_create_category(category_name)
 
-        with self.connect() as connection:
+        with closing(self.connect()) as connection, connection:
             cursor = connection.execute(
                 """
                 INSERT INTO receipts (
@@ -286,7 +298,7 @@ class DataManager:
             return cursor.lastrowid
 
     def get_all_receipts(self, user_id=1):
-        with self.connect() as connection:
+        with closing(self.connect()) as connection:
             rows = connection.execute(
                 """
                 SELECT
@@ -312,10 +324,39 @@ class DataManager:
 
         return [self.row_to_receipt(row) for row in rows]
 
+    def get_receipt_filter_options(self, user_id=1):
+        """Return only the merchants and categories used by this user's receipts."""
+        with closing(self.connect()) as connection:
+            merchants = connection.execute(
+                """
+                SELECT DISTINCT merchants.merchant_name
+                FROM receipts
+                JOIN merchants ON receipts.merchant_id = merchants.merchant_id
+                WHERE receipts.user_id = ?
+                ORDER BY merchants.merchant_name COLLATE NOCASE
+                """,
+                (user_id,),
+            ).fetchall()
+            categories = connection.execute(
+                """
+                SELECT DISTINCT categories.category_name
+                FROM receipts
+                JOIN categories ON receipts.category_id = categories.category_id
+                WHERE receipts.user_id = ?
+                ORDER BY categories.category_name COLLATE NOCASE
+                """,
+                (user_id,),
+            ).fetchall()
+
+        return {
+            "merchants": [row["merchant_name"] for row in merchants],
+            "categories": [row["category_name"] for row in categories],
+        }
+
     def search_receipts(self, user_id, query):
         search_text = f"%{self.escape_like_pattern(query.strip())}%"
 
-        with self.connect() as connection:
+        with closing(self.connect()) as connection:
             rows = connection.execute(
                 """
                 SELECT
@@ -362,7 +403,7 @@ class DataManager:
         merchant_id = self.get_or_create_merchant(merchant_name)
         category_id = self.get_or_create_category(category_name)
 
-        with self.connect() as connection:
+        with closing(self.connect()) as connection, connection:
             cursor = connection.execute(
                 """
                 UPDATE receipts
@@ -393,7 +434,7 @@ class DataManager:
             return cursor.rowcount > 0
 
     def delete_receipt(self, receipt_id, user_id=1):
-        with self.connect() as connection:
+        with closing(self.connect()) as connection, connection:
             cursor = connection.execute(
                 "DELETE FROM receipts WHERE receipt_id = ? AND user_id = ?",
                 (receipt_id, user_id),
@@ -401,7 +442,7 @@ class DataManager:
             return cursor.rowcount > 0
 
     def get_settings(self, user_id=1):
-        with self.connect() as connection:
+        with closing(self.connect()) as connection:
             row = connection.execute(
                 """
                 SELECT
@@ -437,7 +478,7 @@ class DataManager:
         if not is_valid:
             raise ValueError(" ".join(errors))
 
-        with self.connect() as connection:
+        with closing(self.connect()) as connection, connection:
             connection.execute(
                 """
                 INSERT INTO settings (

@@ -10,6 +10,7 @@ without invalidating hashes that were created with the old cost.
 
 import hmac
 import re
+from functools import lru_cache
 from hashlib import pbkdf2_hmac
 from secrets import token_bytes
 
@@ -49,6 +50,19 @@ def verify_password(password, encoded_hash):
 def is_usable_hash(encoded_hash):
     """True when a stored hash could ever authenticate, used to spot unclaimed accounts."""
     return _parse_hash(encoded_hash) is not None
+
+
+@lru_cache(maxsize=1)
+def dummy_password_hash():
+    """A throwaway hash to verify against when no account matches the username.
+
+    Returning early for an unknown username would answer far faster than a
+    wrong password does, so the timing would reveal which usernames exist even
+    though both cases show the same message. Verifying against this hash spends
+    the same work instead. It is built from random bytes at first use, so no
+    password can ever match it.
+    """
+    return hash_password(token_bytes(SALT_BYTES).hex())
 
 
 def validate_credentials(username, password, confirm_password=None):

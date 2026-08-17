@@ -2,6 +2,8 @@ import importlib
 import sys
 from pathlib import Path
 
+from PyQt6.QtCore import QStandardPaths
+
 from app.data.data_manager import DataManager
 from app.services import image_service
 
@@ -29,16 +31,42 @@ def test_application_paths_are_absolute_and_independent_of_cwd(tmp_path, monkeyp
     ) == original
 
 
-def test_data_and_image_directories_sit_under_the_application_root():
+def test_data_and_image_directories_sit_in_the_platform_data_location():
     paths = reload_paths()
+    standard_location = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.AppDataLocation
+    )
 
-    assert paths.DATA_DIR.parent == paths.APP_ROOT
+    assert paths.DATA_DIR == Path(standard_location)
+    assert paths.DATA_DIR.name == paths.APPLICATION_NAME
     assert paths.DATABASE_PATH.parent == paths.DATA_DIR
     assert paths.IMAGE_DIR.parent == paths.DATA_DIR
 
 
-def test_frozen_builds_store_data_beside_the_executable(tmp_path, monkeypatch):
-    """A portable executable must not persist data in PyInstaller's temp extraction dir."""
+def test_data_directories_are_created_when_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "app.paths.application_data_root", lambda: tmp_path / "Receipify"
+    )
+    paths = reload_paths()
+
+    try:
+        assert paths.DATA_DIR.is_dir()
+        assert paths.IMAGE_DIR.is_dir()
+    finally:
+        monkeypatch.undo()
+        reload_paths()
+
+
+def test_data_is_stored_outside_the_application_folder():
+    """The app folder can be read-only, so it must never hold the user's data."""
+    paths = reload_paths()
+
+    assert paths.APP_ROOT not in paths.DATA_DIR.parents
+    assert paths.DATA_DIR != paths.APP_ROOT
+
+
+def test_frozen_builds_store_data_outside_the_extraction_directory(tmp_path, monkeypatch):
+    """A frozen executable must not persist data in PyInstaller's temp extraction dir."""
     executable_directory = tmp_path / "portable-app"
     executable_directory.mkdir()
     extraction_directory = tmp_path / "_MEI123456"
@@ -51,7 +79,7 @@ def test_frozen_builds_store_data_beside_the_executable(tmp_path, monkeypatch):
     paths = reload_paths()
 
     assert paths.APP_ROOT == executable_directory
-    assert paths.DATABASE_PATH == executable_directory / "data" / "receipify.db"
+    assert paths.DATABASE_PATH == paths.DATA_DIR / "receipify.db"
     assert extraction_directory not in paths.DATABASE_PATH.parents
 
     monkeypatch.undo()
@@ -72,7 +100,7 @@ def test_images_stored_under_the_app_root_are_recorded_as_portable_relative_path
     paths = reload_paths()
     source = tmp_path / "receipt.png"
     source.write_bytes(b"image bytes")
-    destination = paths.IMAGE_DIR / "portability-check"
+    destination = paths.APP_ROOT / "portability-check"
 
     stored_path = image_service.copy_receipt_image(source, destination)
 
@@ -82,6 +110,22 @@ def test_images_stored_under_the_app_root_are_recorded_as_portable_relative_path
     finally:
         (paths.APP_ROOT / stored_path).unlink(missing_ok=True)
         destination.rmdir()
+
+
+def test_managed_images_now_live_outside_the_app_root_and_keep_absolute_paths(tmp_path):
+    """Images moved with the data directory, so their stored paths are absolute."""
+    paths = reload_paths()
+    source = tmp_path / "receipt.png"
+    source.write_bytes(b"image bytes")
+
+    stored_path = image_service.copy_receipt_image(source)
+
+    try:
+        assert Path(stored_path).is_absolute()
+        assert Path(stored_path).parent == paths.IMAGE_DIR
+        assert image_service.is_managed_receipt_image(stored_path) is True
+    finally:
+        Path(stored_path).unlink(missing_ok=True)
 
 
 def test_images_stored_outside_the_app_root_keep_an_absolute_path(tmp_path):

@@ -43,3 +43,34 @@ def resolve_image_path(stored_path):
         return image_path
 
     return APP_ROOT / image_path
+
+
+def is_managed_receipt_image(stored_path):
+    """Whether a stored path points inside Receipify's managed image folder."""
+    if not stored_path:
+        return False
+
+    try:
+        resolved_image = resolve_image_path(stored_path).resolve()
+        resolved_image.relative_to(MANAGED_IMAGE_DIRECTORY.resolve())
+    except (OSError, ValueError):
+        return False
+
+    return True
+
+
+def remove_managed_receipt_image(stored_path):
+    """Delete a Receipify copy, never the image originally selected by a user.
+
+    A missing managed copy is already clean. Paths outside ``IMAGE_DIR`` are
+    deliberately ignored, including legacy absolute paths.
+    """
+    if not is_managed_receipt_image(stored_path):
+        return False
+
+    image_path = resolve_image_path(stored_path)
+    if image_path.exists():
+        if not image_path.is_file():
+            raise OSError("Managed image path is not a file.")
+        image_path.unlink()
+    return True

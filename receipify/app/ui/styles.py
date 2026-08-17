@@ -54,6 +54,24 @@ def app_stylesheet():
             border: 1px solid #2563EB;
         }
 
+        QComboBox#filterCombo {
+            background-color: #FFFFFF;
+            border: 1px solid #E2E8F0;
+            border-radius: 10px;
+            color: #334155;
+            font-size: 13px;
+            padding: 7px 10px;
+        }
+
+        QComboBox#filterCombo:focus {
+            border: 1px solid #2563EB;
+        }
+
+        QComboBox#filterCombo::drop-down {
+            border: none;
+            width: 22px;
+        }
+
         QLineEdit#formInput {
             background-color: #FFFFFF;
             border: 1px solid #E2E8F0;
@@ -204,6 +222,12 @@ def app_stylesheet():
             border-radius: 10px;
             color: #64748B;
             font-size: 11px;
+        }
+
+        QLabel#fullReceiptImage {
+            background-color: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            color: #64748B;
         }
 
         QLabel#detailLabel,

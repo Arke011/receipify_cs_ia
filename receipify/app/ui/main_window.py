@@ -1,5 +1,6 @@
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QComboBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -14,12 +15,20 @@ from PyQt6.QtWidgets import (
 )
 
 from app.data.data_manager import DataManager
+from app.services.image_service import remove_managed_receipt_image
+from app.services.receipt_browsing_service import (
+    ALL_OPTION,
+    SORT_OPTIONS,
+    STATUS_OPTIONS,
+    browse_receipts,
+)
 from app.ui.dashboard_page import DashboardPage
 from app.ui.export_page import ExportPage
 from app.ui.receipt_dialog import AddReceiptDialog
 from app.ui.receipt_card import ReceiptCard
 from app.ui.settings_page import SettingsPage
 from app.ui.styles import app_stylesheet
+from app.ui.receipt_image_viewer import ReceiptImageViewer
 
 
 class MainWindow(QMainWindow):
@@ -141,6 +150,48 @@ class MainWindow(QMainWindow):
         self.search_bar.textChanged.connect(self.filter_receipts)
         main_layout.addWidget(self.search_bar)
 
+        filters_layout = QHBoxLayout()
+        filters_layout.setSpacing(8)
+        main_layout.addLayout(filters_layout)
+
+        self.merchant_filter = self.create_filter_combo("Merchant")
+        self.category_filter = self.create_filter_combo("Category")
+        self.warranty_filter = self.create_filter_combo("Warranty")
+        self.return_filter = self.create_filter_combo("Return")
+        self.sort_filter = self.create_filter_combo("Sort")
+        self.warranty_filter.addItems(STATUS_OPTIONS[1:])
+        self.return_filter.addItems(STATUS_OPTIONS[1:])
+        self.sort_filter.clear()
+        self.sort_filter.addItems(SORT_OPTIONS)
+        for filter_widget in (
+            self.merchant_filter,
+            self.category_filter,
+            self.warranty_filter,
+            self.return_filter,
+            self.sort_filter,
+        ):
+            filter_widget.currentTextChanged.connect(self.filter_receipts)
+            filters_layout.addWidget(filter_widget)
+
+        self.purchase_date_from = QLineEdit()
+        self.purchase_date_from.setObjectName("formInput")
+        self.purchase_date_from.setPlaceholderText("From YYYY-MM-DD")
+        self.purchase_date_from.setMinimumHeight(38)
+        self.purchase_date_from.textChanged.connect(self.filter_receipts)
+        filters_layout.addWidget(self.purchase_date_from)
+
+        self.purchase_date_to = QLineEdit()
+        self.purchase_date_to.setObjectName("formInput")
+        self.purchase_date_to.setPlaceholderText("To YYYY-MM-DD")
+        self.purchase_date_to.setMinimumHeight(38)
+        self.purchase_date_to.textChanged.connect(self.filter_receipts)
+        filters_layout.addWidget(self.purchase_date_to)
+
+        self.clear_filters_button = QPushButton("Clear filters")
+        self.clear_filters_button.setObjectName("secondaryButton")
+        self.clear_filters_button.clicked.connect(self.clear_all_filters)
+        filters_layout.addWidget(self.clear_filters_button)
+
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setObjectName("receiptScrollArea")
@@ -160,6 +211,14 @@ class MainWindow(QMainWindow):
         self.empty_label.setObjectName("emptyLabel")
 
         return page
+
+    def create_filter_combo(self, accessible_name):
+        combo = QComboBox()
+        combo.setObjectName("filterCombo")
+        combo.setAccessibleName(accessible_name)
+        combo.setMinimumHeight(38)
+        combo.addItem(ALL_OPTION)
+        return combo
 
     def build_placeholder_page(self, title_text, message):
         page = QWidget()
@@ -188,23 +247,85 @@ class MainWindow(QMainWindow):
             button.setChecked(name == page_name)
 
     def load_receipts(self):
-        receipts = self.data_manager.get_all_receipts(self.user_id)
-        self.display_receipts(receipts)
+        self.refresh_filter_options()
+        self.filter_receipts()
 
     def filter_receipts(self, _text=None):
-        query = self.search_bar.text().strip()
-
-        if query:
-            receipts = self.data_manager.search_receipts(self.user_id, query)
-        else:
-            receipts = self.data_manager.get_all_receipts(self.user_id)
-
+        settings = self.data_manager.get_settings(self.user_id)
+        receipts = browse_receipts(
+            self.data_manager.get_all_receipts(self.user_id),
+            query=self.search_bar.text(),
+            merchant=self.merchant_filter.currentText(),
+            category=self.category_filter.currentText(),
+            warranty_status=self.warranty_filter.currentText(),
+            return_status=self.return_filter.currentText(),
+            purchase_date_from=self.purchase_date_from.text(),
+            purchase_date_to=self.purchase_date_to.text(),
+            sort_by=self.sort_filter.currentText(),
+            warranty_warning_threshold=settings["warranty_warning_threshold"],
+            return_warning_threshold=settings["return_warning_threshold"],
+        )
         self.display_receipts(receipts)
+
+    def refresh_filter_options(self):
+        options = self.data_manager.get_receipt_filter_options(self.user_id)
+        self.set_filter_options(self.merchant_filter, options["merchants"])
+        self.set_filter_options(self.category_filter, options["categories"])
+
+    @staticmethod
+    def set_filter_options(combo, values):
+        current_value = combo.currentText()
+        choices = [ALL_OPTION, *values]
+        # Preserve a selected value after an edit even if no remaining receipt
+        # contains it; the gallery should then correctly show zero matches.
+        if current_value and current_value not in choices:
+            choices.append(current_value)
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItems(choices)
+        combo.setCurrentText(current_value if current_value in choices else ALL_OPTION)
+        combo.blockSignals(False)
+
+    def clear_all_filters(self):
+        for filter_widget in (
+            self.merchant_filter,
+            self.category_filter,
+            self.warranty_filter,
+            self.return_filter,
+        ):
+            filter_widget.setCurrentText(ALL_OPTION)
+        self.sort_filter.setCurrentText(SORT_OPTIONS[0])
+        self.purchase_date_from.clear()
+        self.purchase_date_to.clear()
+        self.search_bar.clear()
+        self.filter_receipts()
+
+    def has_active_browse_filters(self):
+        return any(
+            (
+                self.search_bar.text().strip(),
+                self.merchant_filter.currentText() != ALL_OPTION,
+                self.category_filter.currentText() != ALL_OPTION,
+                self.warranty_filter.currentText() != ALL_OPTION,
+                self.return_filter.currentText() != ALL_OPTION,
+                self.purchase_date_from.text().strip(),
+                self.purchase_date_to.text().strip(),
+                self.sort_filter.currentText() != SORT_OPTIONS[0],
+            )
+        )
 
     def display_receipts(self, receipts):
         self.clear_gallery()
 
         if not receipts:
+            if self.has_active_browse_filters():
+                self.empty_label.setText(
+                    "No receipts match the current search and filters. Try clearing them."
+                )
+            else:
+                self.empty_label.setText(
+                    "No receipts yet. Add your first receipt to begin tracking warranties and returns."
+                )
             self.gallery_layout.addWidget(self.empty_label)
             self.gallery_layout.addStretch(1)
             return
@@ -215,6 +336,7 @@ class MainWindow(QMainWindow):
                 receipt,
                 on_edit=self.open_edit_receipt_dialog,
                 on_delete=self.confirm_delete_receipt,
+                on_view_image=self.open_receipt_image_viewer,
                 warranty_warning_threshold=settings["warranty_warning_threshold"],
                 return_warning_threshold=settings["return_warning_threshold"],
             )
@@ -240,21 +362,44 @@ class MainWindow(QMainWindow):
             parent=self,
         )
 
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            values = dialog.cleaned_values
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            # Nothing was saved, so a copy the dialog made must not be left behind.
+            self.discard_new_image_copy(dialog.cleaned_values.get("image_path"), None)
+            return
+
+        values = dialog.cleaned_values
+        try:
             self.data_manager.add_receipt(user_id=self.user_id, **values)
-            self.search_bar.clear()
-            self.load_receipts()
+        except Exception as error:
+            self.discard_new_image_copy(values.get("image_path"), None)
+            QMessageBox.critical(self, "Unable to add receipt", str(error))
+            return
+        self.load_receipts()
 
     def open_edit_receipt_dialog(self, receipt):
         dialog = AddReceiptDialog(receipt=receipt, parent=self)
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.data_manager.update_receipt(
-                receipt_id=receipt.receipt_id,
-                user_id=self.user_id,
-                **dialog.cleaned_values,
-            )
+            try:
+                updated = self.data_manager.update_receipt(
+                    receipt_id=receipt.receipt_id,
+                    user_id=self.user_id,
+                    **dialog.cleaned_values,
+                )
+            except Exception as error:
+                self.discard_new_image_copy(dialog.cleaned_values.get("image_path"), receipt.image_path)
+                QMessageBox.critical(self, "Unable to update receipt", str(error))
+                return
+            if not updated:
+                self.discard_new_image_copy(dialog.cleaned_values.get("image_path"), receipt.image_path)
+                QMessageBox.critical(
+                    self,
+                    "Unable to update receipt",
+                    "This receipt could not be updated. It may no longer belong to this account.",
+                )
+                return
+            self.remove_replaced_image(receipt.image_path, dialog.cleaned_values.get("image_path"))
+            self.refresh_filter_options()
             self.filter_receipts()
 
     def confirm_delete_receipt(self, receipt):
@@ -267,8 +412,45 @@ class MainWindow(QMainWindow):
         )
 
         if confirmation == QMessageBox.StandardButton.Yes:
-            self.data_manager.delete_receipt(receipt.receipt_id, user_id=self.user_id)
+            try:
+                deleted = self.data_manager.delete_receipt(receipt.receipt_id, user_id=self.user_id)
+            except Exception as error:
+                QMessageBox.critical(self, "Unable to delete receipt", str(error))
+                return
+            if not deleted:
+                QMessageBox.critical(
+                    self,
+                    "Unable to delete receipt",
+                    "This receipt could not be deleted. It may no longer belong to this account.",
+                )
+                return
+            self.remove_replaced_image(receipt.image_path, None)
+            self.refresh_filter_options()
             self.filter_receipts()
+
+    def open_receipt_image_viewer(self, receipt):
+        ReceiptImageViewer(receipt.image_path, parent=self).exec()
+
+    def remove_replaced_image(self, old_path, new_path):
+        if not old_path or old_path == new_path:
+            return
+        try:
+            remove_managed_receipt_image(old_path)
+        except OSError as error:
+            QMessageBox.warning(
+                self,
+                "Image removal failed",
+                f"The receipt was saved, but its old managed image could not be removed: {error}",
+            )
+
+    def discard_new_image_copy(self, new_path, old_path):
+        if new_path and new_path != old_path:
+            try:
+                remove_managed_receipt_image(new_path)
+            except OSError:
+                # The update error is the actionable failure; a later edit can
+                # replace this unused copy safely.
+                pass
 
     def refresh_settings_dependent_views(self):
         self.filter_receipts()

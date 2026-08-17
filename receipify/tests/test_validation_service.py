@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+
 import pytest
 
 from app.services.validation_service import validate_receipt_input
@@ -34,7 +36,9 @@ def test_validate_receipt_input_returns_cleaned_values():
     [
         ("abc", "Price must be numeric."),
         ("NaN", "Price must be numeric."),
-        ("-1", "Price must be greater than or equal to 0."),
+        ("-1", "Price must be greater than 0."),
+        ("0", "Price must be greater than 0."),
+        ("0.00", "Price must be greater than 0."),
     ],
 )
 def test_validate_receipt_input_rejects_invalid_prices(price, expected_error):
@@ -50,6 +54,57 @@ def test_validate_receipt_input_rejects_invalid_prices(price, expected_error):
     assert is_valid is False
     assert expected_error in errors
     assert values == {}
+
+
+def test_validate_receipt_input_accepts_the_smallest_payable_price():
+    is_valid, errors, values = validate_receipt_input(
+        product_name="Mouse",
+        merchant_name="Store",
+        price="0.01",
+        purchase_date="2026-08-15",
+        warranty_days="0",
+        return_days="0",
+    )
+
+    assert is_valid is True
+    assert errors == []
+    assert values["price_cents"] == 1
+
+
+@pytest.mark.parametrize("days_ahead", [1, 30, 3650])
+def test_validate_receipt_input_rejects_future_purchase_dates(days_ahead):
+    future_date = date.today() + timedelta(days=days_ahead)
+
+    is_valid, errors, values = validate_receipt_input(
+        product_name="Mouse",
+        merchant_name="Store",
+        price="1",
+        purchase_date=future_date.isoformat(),
+        warranty_days="0",
+        return_days="0",
+    )
+
+    assert is_valid is False
+    assert errors == ["Purchase date cannot be in the future."]
+    assert values == {}
+
+
+@pytest.mark.parametrize("days_ago", [0, 1, 3650])
+def test_validate_receipt_input_accepts_today_and_past_purchase_dates(days_ago):
+    purchase_date = date.today() - timedelta(days=days_ago)
+
+    is_valid, errors, values = validate_receipt_input(
+        product_name="Mouse",
+        merchant_name="Store",
+        price="1",
+        purchase_date=purchase_date.isoformat(),
+        warranty_days="0",
+        return_days="0",
+    )
+
+    assert is_valid is True
+    assert errors == []
+    assert values["purchase_date"] == purchase_date.isoformat()
 
 
 @pytest.mark.parametrize("price", ["1e400", "1E400", "9" * 400, "1e1000"])

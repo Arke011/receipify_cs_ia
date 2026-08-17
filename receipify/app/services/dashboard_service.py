@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 
 from app.models.receipt import Receipt
 
@@ -19,6 +20,7 @@ class DashboardSummary:
     expiring_soon: list[ExpiryItem]
     expired: list[ExpiryItem]
     category_spending: list[tuple[str, int]]
+    monthly_spending: dict[str, int]
 
 
 def build_dashboard_summary(
@@ -84,7 +86,33 @@ def build_dashboard_summary(
             category_totals.items(),
             key=lambda item: (-item[1], item[0].casefold()),
         ),
+        monthly_spending=build_monthly_spending(receipts),
     )
+
+
+def build_monthly_spending(receipts) -> dict[str, int]:
+    """Total spending per purchase month, keyed by "YYYY-MM" in date order.
+
+    A stored purchase date that cannot be parsed belongs to no month, so it is
+    left out rather than allowed to break the whole breakdown.
+    """
+    monthly_totals = {}
+
+    for receipt in receipts:
+        month = _purchase_month(receipt.purchase_date)
+        if month is None:
+            continue
+
+        monthly_totals[month] = monthly_totals.get(month, 0) + receipt.price_cents
+
+    return dict(sorted(monthly_totals.items()))
+
+
+def _purchase_month(purchase_date):
+    try:
+        return datetime.strptime(purchase_date, "%Y-%m-%d").strftime("%Y-%m")
+    except (TypeError, ValueError):
+        return None
 
 
 def _add_expiry_item(

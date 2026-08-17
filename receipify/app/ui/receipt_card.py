@@ -1,4 +1,4 @@
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QFrame,
@@ -13,12 +13,22 @@ from PyQt6.QtWidgets import (
 from app.services.image_service import resolve_image_path
 
 
+class ReceiptThumbnail(QLabel):
+    clicked = pyqtSignal()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+
 class ReceiptCard(QFrame):
     def __init__(
         self,
         receipt,
         on_edit=None,
         on_delete=None,
+        on_view_image=None,
         warranty_warning_threshold=30,
         return_warning_threshold=7,
         parent=None,
@@ -27,6 +37,7 @@ class ReceiptCard(QFrame):
         self.receipt = receipt
         self.on_edit = on_edit
         self.on_delete = on_delete
+        self.on_view_image = on_view_image
         self.warranty_warning_threshold = warranty_warning_threshold
         self.return_warning_threshold = return_warning_threshold
         self.setObjectName("receiptCard")
@@ -41,10 +52,11 @@ class ReceiptCard(QFrame):
         header_layout.setSpacing(18)
         layout.addLayout(header_layout)
 
-        self.image_label = QLabel()
+        self.image_label = ReceiptThumbnail()
         self.image_label.setObjectName("receiptImage")
         self.image_label.setFixedSize(96, 72)
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.clicked.connect(self.handle_view_image)
         self.set_receipt_image()
         header_layout.addWidget(self.image_label)
 
@@ -139,6 +151,10 @@ class ReceiptCard(QFrame):
     def handle_delete(self):
         if self.on_delete is not None:
             self.on_delete(self.receipt)
+
+    def handle_view_image(self):
+        if self.receipt.image_path and self.on_view_image is not None:
+            self.on_view_image(self.receipt)
 
     def add_detail(self, layout, row, column, label_text, value_text):
         detail = QWidget()

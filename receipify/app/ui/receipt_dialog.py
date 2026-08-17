@@ -31,6 +31,7 @@ class AddReceiptDialog(QDialog):
         self.is_editing = receipt is not None
         self.image_path = receipt.image_path if receipt else None
         self.selected_image_path = None
+        self.image_removed = False
         self.default_warranty_days = default_warranty_days
         self.default_return_days = default_return_days
         self.setWindowTitle("Edit Receipt" if self.is_editing else "New Receipt")
@@ -167,6 +168,12 @@ class AddReceiptDialog(QDialog):
         browse_button.setObjectName("secondaryButton")
         browse_button.clicked.connect(self.choose_image)
         layout.addWidget(browse_button)
+
+        self.remove_image_button = QPushButton("Remove")
+        self.remove_image_button.setObjectName("dangerButton")
+        self.remove_image_button.clicked.connect(self.remove_image)
+        self.remove_image_button.setEnabled(bool(self.image_path))
+        layout.addWidget(self.remove_image_button)
         return selector
 
     def choose_image(self):
@@ -179,11 +186,21 @@ class AddReceiptDialog(QDialog):
 
         if selected_path:
             self.selected_image_path = selected_path
+            self.image_removed = False
             self.update_image_display()
+
+    def remove_image(self):
+        """Mark the current attachment for removal when this edit is saved."""
+        self.selected_image_path = None
+        self.image_path = None
+        self.image_removed = True
+        self.remove_image_button.setEnabled(False)
+        self.update_image_display()
 
     def update_image_display(self):
         displayed_path = self.selected_image_path or self.image_path
         self.image_path_input.setText(Path(displayed_path).name if displayed_path else "")
+        self.remove_image_button.setEnabled(bool(displayed_path))
 
     def validate_and_accept(self):
         is_valid, errors, cleaned_values = validate_receipt_input(
