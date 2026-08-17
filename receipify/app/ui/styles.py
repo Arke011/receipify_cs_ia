@@ -224,6 +224,62 @@ def app_stylesheet():
             font-size: 12px;
         }
 
+        QProgressBar#categoryBar {
+            background-color: #F1F5F9;
+            border: none;
+            border-radius: 6px;
+            color: #FFFFFF;
+            font-size: 10px;
+            font-weight: 800;
+            text-align: center;
+        }
+
+        QProgressBar#categoryBar::chunk {
+            background-color: #2563EB;
+            border-radius: 6px;
+        }
+
+        QLabel#categoryName {
+            color: #1E293B;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        QLabel#categoryAmount {
+            color: #334155;
+            font-size: 13px;
+            font-weight: 800;
+        }
+
+        QScrollArea#deadlineScrollArea,
+        QWidget#deadlineContent {
+            background-color: transparent;
+            border: none;
+        }
+
+        QFrame#deadlineRow {
+            background-color: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            border-radius: 12px;
+        }
+
+        QLabel#deadlineProduct {
+            color: #1E293B;
+            font-size: 14px;
+            font-weight: 800;
+        }
+
+        QLabel#deadlineMeta {
+            color: #64748B;
+            font-size: 12px;
+        }
+
+        QLabel#deadlineDate {
+            color: #334155;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
         QListWidget#exportList {
             background-color: #FFFFFF;
             border: 1px solid #E2E8F0;

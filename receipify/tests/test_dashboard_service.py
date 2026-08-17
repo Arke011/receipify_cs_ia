@@ -1,7 +1,101 @@
 from datetime import date, timedelta
 
+import pytest
+
+from app.data.data_manager import DataManager
 from app.models.receipt import Receipt
-from app.services.dashboard_service import build_dashboard_summary
+from app.services.dashboard_service import DashboardService, build_dashboard_summary
+
+
+@pytest.fixture
+def service(tmp_path):
+    data_manager = DataManager(tmp_path / "receipify-test.db")
+    return DashboardService(data_manager)
+
+
+def store_receipt(service, product_name, price_cents, purchase_date, **overrides):
+    values = {
+        "product_name": product_name,
+        "merchant_name": "Tech Store",
+        "category_name": "Electronics",
+        "price_cents": price_cents,
+        "purchase_date": purchase_date,
+        "warranty_days": 0,
+        "return_days": 0,
+        "user_id": 1,
+    }
+    values.update(overrides)
+    return service.data_manager.add_receipt(**values)
+
+
+def test_total_spending_covers_only_the_requested_user(service):
+    alice_id = service.data_manager.register_user("alice", "password123")
+    bob_id = service.data_manager.register_user("bob", "password123")
+    store_receipt(service, "Mouse", 2499, "2026-08-15", user_id=alice_id)
+    store_receipt(service, "Keyboard", 5000, "2026-08-16", user_id=alice_id)
+    store_receipt(service, "Someone else's", 9900, "2026-08-16", user_id=bob_id)
+
+    assert service.get_total_spending(alice_id) == 7499
+    assert service.get_total_spending(bob_id) == 9900
+
+
+def test_active_and_expired_counts_ignore_receipts_without_a_warranty(service):
+    today = date.today()
+    store_receipt(
+        service, "Live", 1000, (today - timedelta(days=10)).isoformat(), warranty_days=365
+    )
+    store_receipt(
+        service, "Lapsed", 1000, (today - timedelta(days=400)).isoformat(), warranty_days=30
+    )
+    store_receipt(service, "No warranty", 1000, today.isoformat(), warranty_days=0)
+
+    assert service.get_active_and_expired_counts(1) == {"active": 1, "expired": 1}
+
+
+def test_category_spending_totals_by_category_largest_first(service):
+    store_receipt(service, "Mouse", 2499, "2026-08-15", category_name="Electronics")
+    store_receipt(service, "Cable", 999, "2026-08-15", category_name="Electronics")
+    store_receipt(service, "Blender", 8000, "2026-08-15", category_name="Kitchen")
+
+    assert service.get_category_spending(1) == {"Kitchen": 8000, "Electronics": 3498}
+
+
+def test_monthly_spending_is_grouped_and_ordered_by_month(service):
+    store_receipt(service, "Mouse", 2499, "2026-08-15")
+    store_receipt(service, "Cable", 1000, "2026-08-02")
+    store_receipt(service, "Blender", 8000, "2026-06-30")
+
+    assert service.get_monthly_spending(1) == {"2026-06": 8000, "2026-08": 3499}
+
+
+def test_upcoming_deadlines_are_within_the_window_and_soonest_first(service):
+    today = date.today()
+    store_receipt(
+        service, "Soon", 1000, (today - timedelta(days=25)).isoformat(), warranty_days=30
+    )
+    store_receipt(
+        service, "Overdue", 1000, (today - timedelta(days=40)).isoformat(), return_days=30
+    )
+    store_receipt(
+        service, "Far off", 1000, today.isoformat(), warranty_days=365
+    )
+
+    deadlines = service.get_upcoming_deadlines(1, days=30)
+
+    assert [(item.receipt.product_name, item.period_name) for item in deadlines] == [
+        ("Overdue", "Return"),
+        ("Soon", "Warranty"),
+    ]
+    assert deadlines[0].days_remaining == -10
+    assert deadlines[1].days_remaining == 5
+
+
+def test_every_metric_handles_an_empty_account(service):
+    assert service.get_total_spending(1) == 0
+    assert service.get_active_and_expired_counts(1) == {"active": 0, "expired": 0}
+    assert service.get_category_spending(1) == {}
+    assert service.get_monthly_spending(1) == {}
+    assert service.get_upcoming_deadlines(1) == []
 
 
 def make_receipt(receipt_id, product_name, category_name, price_cents, purchase_date, **periods):

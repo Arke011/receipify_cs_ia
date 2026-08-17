@@ -33,6 +33,9 @@ from app.ui.receipt_image_viewer import ReceiptImageViewer
 class MainWindow(QMainWindow):
     logged_out = pyqtSignal()
     closed = pyqtSignal()
+    # Emitted after a receipt is added, edited, or deleted, so every view built
+    # from receipts refreshes without waiting to be opened again.
+    receipts_changed = pyqtSignal()
 
     def __init__(self, data_manager=None, user_id=1, username=None):
         super().__init__()
@@ -77,6 +80,9 @@ class MainWindow(QMainWindow):
         }
         for page in self.pages.values():
             self.page_stack.addWidget(page)
+
+        self.receipts_changed.connect(self.dashboard_page.refresh)
+        self.receipts_changed.connect(self.export_page.refresh)
 
         self.show_page("Receipts")
         self.setStyleSheet(app_stylesheet())
@@ -316,6 +322,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Unable to add receipt", str(error))
             return
         self.load_receipts()
+        self.receipts_changed.emit()
 
     def open_edit_receipt_dialog(self, receipt):
         dialog = AddReceiptDialog(receipt=receipt, parent=self)
@@ -341,6 +348,7 @@ class MainWindow(QMainWindow):
                 return
             self.remove_replaced_image(receipt.image_path, dialog.cleaned_values.get("image_path"))
             self.filter_receipts()
+            self.receipts_changed.emit()
 
     def confirm_delete_receipt(self, receipt):
         confirmation = QMessageBox.question(
@@ -366,6 +374,7 @@ class MainWindow(QMainWindow):
                 return
             self.remove_replaced_image(receipt.image_path, None)
             self.filter_receipts()
+            self.receipts_changed.emit()
 
     def open_receipt_image_viewer(self, receipt):
         ReceiptImageViewer(receipt.image_path, parent=self).exec()

@@ -47,6 +47,10 @@ main.py          Application entry point
 
 ## Current scope
 
-The Receipts section is functional: receipts can be added and searched.
-Dashboard, Export, Settings, and OCR Import are navigation placeholders for
-future work. OCR is intentionally not implemented yet.
+Receipts, Dashboard, Export, and Settings are all functional. Receipts can be
+added, edited, deleted, searched, filtered, and exported as CSV or JSON, and the
+dashboard charts spending and upcoming warranty and return deadlines.
+
+Reading receipt details from a photo is not implemented. The entry point for it
+sits in the Add Receipt dialog as "Scan with OCR", which currently explains that
+the feature is not available yet.

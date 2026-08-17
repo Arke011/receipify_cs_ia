@@ -90,6 +90,99 @@ def build_dashboard_summary(
     )
 
 
+class DashboardService:
+    """The dashboard's read model, one method per figure the page displays.
+
+    Each method takes the user whose data is wanted so a signed-in account can
+    never see another account's totals.
+    """
+
+    DEFAULT_DEADLINE_DAYS = 30
+
+    def __init__(self, data_manager):
+        self.data_manager = data_manager
+
+    def get_total_spending(self, user_id) -> int:
+        """Total spent by this user, in cents."""
+        return sum(receipt.price_cents for receipt in self._receipts(user_id))
+
+    def get_active_and_expired_counts(self, user_id) -> dict[str, int]:
+        """How many warranties are still running against how many have run out.
+
+        A receipt recorded without a warranty period counts as neither, so the
+        two figures only ever describe warranties that actually exist.
+        """
+        active = 0
+        expired = 0
+
+        for receipt in self._receipts(user_id):
+            days_remaining = receipt.days_until_warranty_expiry()
+            if days_remaining is None:
+                continue
+            if days_remaining < 0:
+                expired += 1
+            else:
+                active += 1
+
+        return {"active": active, "expired": expired}
+
+    def get_category_spending(self, user_id) -> dict[str, int]:
+        """Spending per category in cents, largest first."""
+        category_totals = {}
+
+        for receipt in self._receipts(user_id):
+            category_totals[receipt.category_name] = (
+                category_totals.get(receipt.category_name, 0) + receipt.price_cents
+            )
+
+        return dict(
+            sorted(category_totals.items(), key=lambda item: (-item[1], item[0].casefold()))
+        )
+
+    def get_monthly_spending(self, user_id) -> dict[str, int]:
+        """Spending per purchase month in cents, oldest month first."""
+        return build_monthly_spending(self._receipts(user_id))
+
+    def get_upcoming_deadlines(self, user_id, days=DEFAULT_DEADLINE_DAYS) -> list[ExpiryItem]:
+        """Warranty and return periods needing attention, soonest deadline first.
+
+        Deadlines already passed are kept: a return window that closed
+        yesterday is exactly what the user needs to be told about.
+        """
+        deadlines = []
+
+        for receipt in self._receipts(user_id):
+            for period_name, expiry_date, days_remaining in (
+                (
+                    "Warranty",
+                    receipt.warranty_expiry_date(),
+                    receipt.days_until_warranty_expiry(),
+                ),
+                (
+                    "Return",
+                    receipt.return_expiry_date(),
+                    receipt.days_until_return_expiry(),
+                ),
+            ):
+                if days_remaining is None or days_remaining > days:
+                    continue
+                deadlines.append(
+                    ExpiryItem(receipt, period_name, expiry_date, days_remaining)
+                )
+
+        return sorted(
+            deadlines,
+            key=lambda item: (
+                item.days_remaining,
+                item.receipt.product_name.casefold(),
+                item.period_name,
+            ),
+        )
+
+    def _receipts(self, user_id):
+        return self.data_manager.get_all_receipts(user_id)
+
+
 def build_monthly_spending(receipts) -> dict[str, int]:
     """Total spending per purchase month, keyed by "YYYY-MM" in date order.
 

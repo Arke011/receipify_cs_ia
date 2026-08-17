@@ -166,8 +166,8 @@ def test_main_window_shows_only_the_authenticated_users_receipts(qapp, data_mana
 
     assert [c.receipt.product_name for c in alice_window.receipt_cards] == ["Alice Item"]
     assert bob_window.receipt_cards == []
-    assert bob_window.dashboard_page.total_receipts_value.text() == "0"
-    assert alice_window.dashboard_page.total_receipts_value.text() == "1"
+    assert bob_window.dashboard_page.total_spending_value.text() == "EUR 0.00"
+    assert alice_window.dashboard_page.total_spending_value.text() == "EUR 1.00"
     alice_window.close()
     bob_window.close()
 
