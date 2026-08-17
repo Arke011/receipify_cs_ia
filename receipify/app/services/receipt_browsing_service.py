@@ -22,6 +22,25 @@ ALL_OPTION = "All"
 STATUS_OPTIONS = (ALL_OPTION, "Active", "Expiring soon", "Expired", "Not tracked")
 
 
+def default_filters() -> dict:
+    """The unfiltered gallery. Keys match ``browse_receipts`` keyword arguments."""
+    return {
+        "merchant": ALL_OPTION,
+        "category": ALL_OPTION,
+        "warranty_status": ALL_OPTION,
+        "return_status": ALL_OPTION,
+        "purchase_date_from": "",
+        "purchase_date_to": "",
+        "sort_by": SORT_OPTIONS[0],
+    }
+
+
+def active_filter_count(filters) -> int:
+    """How many filters differ from the default, used to label the filter button."""
+    defaults = default_filters()
+    return sum(1 for key, value in filters.items() if value != defaults.get(key))
+
+
 def browse_receipts(
     receipts,
     *,

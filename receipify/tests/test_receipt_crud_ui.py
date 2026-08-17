@@ -1,10 +1,11 @@
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QDialog, QMessageBox
 
 from app.data.data_manager import DataManager
 from app.models.receipt import Receipt
-from app.ui import main_window
+from app.ui import main_window, receipt_dialog
 from app.ui.receipt_card import ReceiptCard
-from app.ui.receipt_dialog import AddReceiptDialog
+from app.ui.receipt_dialog import AddReceiptDialog, ElidedLabel
 
 
 def make_receipt(**overrides):
@@ -59,6 +60,64 @@ def test_add_dialog_uses_configured_period_defaults(qapp):
 
     assert dialog.warranty_days_input.text() == "730"
     assert dialog.return_days_input.text() == "14"
+
+
+def test_image_selector_starts_empty_and_hides_removal(qapp):
+    dialog = AddReceiptDialog()
+
+    assert dialog.image_name_label.full_text == "No image attached"
+    assert dialog.image_hint_label.full_text == "PNG, JPG, BMP, GIF, or WEBP"
+    assert dialog.remove_image_button.isHidden() is True
+
+
+def test_image_selector_shows_the_chosen_file_and_keeps_the_path_reachable(qapp, tmp_path):
+    image_path = tmp_path / "scans" / "2026" / "a-very-long-receipt-file-name.png"
+    image_path.parent.mkdir(parents=True)
+    assert QPixmap(120, 90).save(str(image_path))
+
+    dialog = AddReceiptDialog()
+    dialog.selected_image_path = str(image_path)
+    dialog.update_image_display()
+
+    assert dialog.image_name_label.full_text == "a-very-long-receipt-file-name.png"
+    assert dialog.image_hint_label.full_text.endswith("scans/2026")
+    # However long the name is, the whole path stays available on hover.
+    assert dialog.image_selector.toolTip() == str(image_path)
+    assert dialog.remove_image_button.isHidden() is False
+    assert dialog.image_preview.pixmap().isNull() is False
+
+    dialog.remove_image()
+
+    assert dialog.image_removed is True
+    assert dialog.image_name_label.full_text == "No image attached"
+    assert dialog.remove_image_button.isHidden() is True
+
+
+def test_long_file_names_are_elided_rather_than_stretching_the_row(qapp):
+    label = ElidedLabel()
+    label.resize(120, 20)
+    label.setText("an-extremely-long-receipt-file-name-that-will-not-fit.png")
+
+    assert label.full_text.endswith(".png")
+    assert label.text() != label.full_text
+    assert label.text().endswith("…")
+
+
+def test_ocr_is_offered_inside_the_add_dialog(monkeypatch, qapp):
+    dialog = AddReceiptDialog()
+    messages = []
+    monkeypatch.setattr(
+        receipt_dialog.QMessageBox,
+        "information",
+        staticmethod(lambda parent, title, text: messages.append(title)),
+    )
+
+    dialog.scan_image_button.click()
+
+    assert messages == ["Scan with OCR"]
+    # Nothing is saved by an OCR attempt that is not built yet.
+    assert dialog.cleaned_values == {}
+    assert dialog.result() != QDialog.DialogCode.Accepted
 
 
 def test_receipt_card_actions_call_their_callbacks(qapp):

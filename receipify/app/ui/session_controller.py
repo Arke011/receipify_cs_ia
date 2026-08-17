@@ -25,6 +25,11 @@ class SessionController:
         self.login_dialog.accepted.connect(self.open_main_window)
         self.login_dialog.rejected.connect(self.quit)
         self.login_dialog.open()
+        # After a log out the main window has just closed, so the dialog has to
+        # ask for the window focus rather than wait to be found behind others.
+        self.login_dialog.raise_()
+        self.login_dialog.activateWindow()
+        self.login_dialog.username_input.setFocus()
 
     def open_main_window(self):
         dialog = self.login_dialog

@@ -20,9 +20,17 @@ EXPORT_FIELDS = (
 )
 
 
-def export_user_receipts(data_manager, user_id, output_path, export_format):
-    """Export only one user's receipts and return the number written."""
+def export_user_receipts(data_manager, user_id, output_path, export_format, receipt_ids=None):
+    """Export one user's receipts and return the number written.
+
+    ``receipt_ids`` limits the export to a chosen subset. Leaving it out
+    exports everything the user owns.
+    """
     receipts = data_manager.get_all_receipts(user_id)
+    if receipt_ids is not None:
+        wanted_ids = set(receipt_ids)
+        receipts = [receipt for receipt in receipts if receipt.receipt_id in wanted_ids]
+
     settings = data_manager.get_settings(user_id)
     records = [
         receipt_to_export_record(

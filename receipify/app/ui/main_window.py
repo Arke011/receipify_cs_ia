@@ -1,6 +1,5 @@
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QComboBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -17,13 +16,13 @@ from PyQt6.QtWidgets import (
 from app.data.data_manager import DataManager
 from app.services.image_service import remove_managed_receipt_image
 from app.services.receipt_browsing_service import (
-    ALL_OPTION,
-    SORT_OPTIONS,
-    STATUS_OPTIONS,
+    active_filter_count,
     browse_receipts,
+    default_filters,
 )
 from app.ui.dashboard_page import DashboardPage
 from app.ui.export_page import ExportPage
+from app.ui.filter_dialog import FilterDialog, filter_icon
 from app.ui.receipt_dialog import AddReceiptDialog
 from app.ui.receipt_card import ReceiptCard
 from app.ui.settings_page import SettingsPage
@@ -41,6 +40,7 @@ class MainWindow(QMainWindow):
         self.username = username
         self.data_manager = data_manager or DataManager()
         self.receipt_cards = []
+        self.filters = default_filters()
 
         self.setWindowTitle(f"Receipify - {username}" if username else "Receipify")
         self.resize(1040, 760)
@@ -74,10 +74,6 @@ class MainWindow(QMainWindow):
             "Dashboard": self.dashboard_page,
             "Export": self.export_page,
             "Settings": self.settings_page,
-            "OCR Import": self.build_placeholder_page(
-                "OCR Import",
-                "OCR receipt importing is planned for a future update. No OCR processing is available yet.",
-            ),
         }
         for page in self.pages.values():
             self.page_stack.addWidget(page)
@@ -96,7 +92,7 @@ class MainWindow(QMainWindow):
         navigation_layout.addStretch(1)
 
         self.navigation_buttons = {}
-        for page_name in ("Receipts", "Dashboard", "Export", "Settings", "OCR Import"):
+        for page_name in ("Receipts", "Dashboard", "Export", "Settings"):
             button = QPushButton(page_name)
             button.setObjectName("navButton")
             button.setCheckable(True)
@@ -143,54 +139,25 @@ class MainWindow(QMainWindow):
         add_button.clicked.connect(self.open_add_receipt_dialog)
         header_layout.addWidget(add_button, alignment=Qt.AlignmentFlag.AlignTop)
 
+        search_layout = QHBoxLayout()
+        search_layout.setSpacing(10)
+        main_layout.addLayout(search_layout)
+
         self.search_bar = QLineEdit()
         self.search_bar.setObjectName("searchBar")
-        self.search_bar.setPlaceholderText("Search by product or store...")
+        self.search_bar.setPlaceholderText("Search by product, store, category, or price...")
         self.search_bar.setMinimumHeight(48)
         self.search_bar.textChanged.connect(self.filter_receipts)
-        main_layout.addWidget(self.search_bar)
+        search_layout.addWidget(self.search_bar, stretch=1)
 
-        filters_layout = QHBoxLayout()
-        filters_layout.setSpacing(8)
-        main_layout.addLayout(filters_layout)
-
-        self.merchant_filter = self.create_filter_combo("Merchant")
-        self.category_filter = self.create_filter_combo("Category")
-        self.warranty_filter = self.create_filter_combo("Warranty")
-        self.return_filter = self.create_filter_combo("Return")
-        self.sort_filter = self.create_filter_combo("Sort")
-        self.warranty_filter.addItems(STATUS_OPTIONS[1:])
-        self.return_filter.addItems(STATUS_OPTIONS[1:])
-        self.sort_filter.clear()
-        self.sort_filter.addItems(SORT_OPTIONS)
-        for filter_widget in (
-            self.merchant_filter,
-            self.category_filter,
-            self.warranty_filter,
-            self.return_filter,
-            self.sort_filter,
-        ):
-            filter_widget.currentTextChanged.connect(self.filter_receipts)
-            filters_layout.addWidget(filter_widget)
-
-        self.purchase_date_from = QLineEdit()
-        self.purchase_date_from.setObjectName("formInput")
-        self.purchase_date_from.setPlaceholderText("From YYYY-MM-DD")
-        self.purchase_date_from.setMinimumHeight(38)
-        self.purchase_date_from.textChanged.connect(self.filter_receipts)
-        filters_layout.addWidget(self.purchase_date_from)
-
-        self.purchase_date_to = QLineEdit()
-        self.purchase_date_to.setObjectName("formInput")
-        self.purchase_date_to.setPlaceholderText("To YYYY-MM-DD")
-        self.purchase_date_to.setMinimumHeight(38)
-        self.purchase_date_to.textChanged.connect(self.filter_receipts)
-        filters_layout.addWidget(self.purchase_date_to)
-
-        self.clear_filters_button = QPushButton("Clear filters")
-        self.clear_filters_button.setObjectName("secondaryButton")
-        self.clear_filters_button.clicked.connect(self.clear_all_filters)
-        filters_layout.addWidget(self.clear_filters_button)
+        self.filter_button = QPushButton()
+        self.filter_button.setObjectName("filterButton")
+        self.filter_button.setIcon(filter_icon())
+        self.filter_button.setMinimumHeight(48)
+        self.filter_button.setMinimumWidth(132)
+        self.filter_button.clicked.connect(self.open_filter_dialog)
+        search_layout.addWidget(self.filter_button)
+        self.update_filter_button()
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -204,37 +171,28 @@ class MainWindow(QMainWindow):
         self.gallery_layout.setSpacing(16)
         self.scroll_area.setWidget(self.gallery_widget)
 
+        self.empty_state = QWidget()
+        empty_layout = QVBoxLayout(self.empty_state)
+        empty_layout.setContentsMargins(0, 40, 0, 0)
+        empty_layout.setSpacing(14)
+
         self.empty_label = QLabel(
             "No receipts yet. Add your first receipt to begin tracking warranties and returns."
         )
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_label.setObjectName("emptyLabel")
+        self.empty_label.setWordWrap(True)
+        empty_layout.addWidget(self.empty_label)
 
-        return page
+        # Offered only when something is actually filtered out, so an empty
+        # account is not told to clear filters it never set.
+        self.clear_filters_button = QPushButton("Clear search and filters")
+        self.clear_filters_button.setObjectName("secondaryButton")
+        self.clear_filters_button.clicked.connect(self.clear_all_filters)
+        empty_layout.addWidget(
+            self.clear_filters_button, alignment=Qt.AlignmentFlag.AlignCenter
+        )
 
-    def create_filter_combo(self, accessible_name):
-        combo = QComboBox()
-        combo.setObjectName("filterCombo")
-        combo.setAccessibleName(accessible_name)
-        combo.setMinimumHeight(38)
-        combo.addItem(ALL_OPTION)
-        return combo
-
-    def build_placeholder_page(self, title_text, message):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-
-        title = QLabel(title_text)
-        title.setObjectName("pageTitle")
-        layout.addWidget(title)
-
-        subtitle = QLabel(message)
-        subtitle.setObjectName("pageSubtitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
-        layout.addStretch(1)
         return page
 
     def show_page(self, page_name):
@@ -243,11 +201,12 @@ class MainWindow(QMainWindow):
             self.dashboard_page.refresh()
         elif page_name == "Settings":
             self.settings_page.load_settings()
+        elif page_name == "Export":
+            self.export_page.refresh()
         for name, button in self.navigation_buttons.items():
             button.setChecked(name == page_name)
 
     def load_receipts(self):
-        self.refresh_filter_options()
         self.filter_receipts()
 
     def filter_receipts(self, _text=None):
@@ -255,78 +214,60 @@ class MainWindow(QMainWindow):
         receipts = browse_receipts(
             self.data_manager.get_all_receipts(self.user_id),
             query=self.search_bar.text(),
-            merchant=self.merchant_filter.currentText(),
-            category=self.category_filter.currentText(),
-            warranty_status=self.warranty_filter.currentText(),
-            return_status=self.return_filter.currentText(),
-            purchase_date_from=self.purchase_date_from.text(),
-            purchase_date_to=self.purchase_date_to.text(),
-            sort_by=self.sort_filter.currentText(),
             warranty_warning_threshold=settings["warranty_warning_threshold"],
             return_warning_threshold=settings["return_warning_threshold"],
+            **self.filters,
         )
         self.display_receipts(receipts)
 
-    def refresh_filter_options(self):
+    def open_filter_dialog(self):
         options = self.data_manager.get_receipt_filter_options(self.user_id)
-        self.set_filter_options(self.merchant_filter, options["merchants"])
-        self.set_filter_options(self.category_filter, options["categories"])
+        dialog = FilterDialog(
+            self.filters,
+            merchants=options["merchants"],
+            categories=options["categories"],
+            parent=self,
+        )
 
-    @staticmethod
-    def set_filter_options(combo, values):
-        current_value = combo.currentText()
-        choices = [ALL_OPTION, *values]
-        # Preserve a selected value after an edit even if no remaining receipt
-        # contains it; the gallery should then correctly show zero matches.
-        if current_value and current_value not in choices:
-            choices.append(current_value)
-        combo.blockSignals(True)
-        combo.clear()
-        combo.addItems(choices)
-        combo.setCurrentText(current_value if current_value in choices else ALL_OPTION)
-        combo.blockSignals(False)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.filters = dialog.values
+            self.update_filter_button()
+            self.filter_receipts()
+
+    def update_filter_button(self):
+        count = active_filter_count(self.filters)
+        self.filter_button.setText(f"Filters ({count})" if count else "Filters")
+        self.filter_button.setProperty("filtersActive", "yes" if count else "no")
+        # Qt only re-reads a property selector after the widget is repolished.
+        self.filter_button.style().unpolish(self.filter_button)
+        self.filter_button.style().polish(self.filter_button)
 
     def clear_all_filters(self):
-        for filter_widget in (
-            self.merchant_filter,
-            self.category_filter,
-            self.warranty_filter,
-            self.return_filter,
-        ):
-            filter_widget.setCurrentText(ALL_OPTION)
-        self.sort_filter.setCurrentText(SORT_OPTIONS[0])
-        self.purchase_date_from.clear()
-        self.purchase_date_to.clear()
+        self.filters = default_filters()
+        self.update_filter_button()
         self.search_bar.clear()
         self.filter_receipts()
 
     def has_active_browse_filters(self):
-        return any(
-            (
-                self.search_bar.text().strip(),
-                self.merchant_filter.currentText() != ALL_OPTION,
-                self.category_filter.currentText() != ALL_OPTION,
-                self.warranty_filter.currentText() != ALL_OPTION,
-                self.return_filter.currentText() != ALL_OPTION,
-                self.purchase_date_from.text().strip(),
-                self.purchase_date_to.text().strip(),
-                self.sort_filter.currentText() != SORT_OPTIONS[0],
-            )
+        return bool(
+            self.search_bar.text().strip() or active_filter_count(self.filters)
         )
 
     def display_receipts(self, receipts):
         self.clear_gallery()
 
         if not receipts:
-            if self.has_active_browse_filters():
+            is_filtered = self.has_active_browse_filters()
+            if is_filtered:
                 self.empty_label.setText(
-                    "No receipts match the current search and filters. Try clearing them."
+                    "No receipts match the current search and filters."
                 )
             else:
                 self.empty_label.setText(
                     "No receipts yet. Add your first receipt to begin tracking warranties and returns."
                 )
-            self.gallery_layout.addWidget(self.empty_label)
+            self.clear_filters_button.setVisible(is_filtered)
+            self.gallery_layout.addWidget(self.empty_state)
             self.gallery_layout.addStretch(1)
             return
 
@@ -399,7 +340,6 @@ class MainWindow(QMainWindow):
                 )
                 return
             self.remove_replaced_image(receipt.image_path, dialog.cleaned_values.get("image_path"))
-            self.refresh_filter_options()
             self.filter_receipts()
 
     def confirm_delete_receipt(self, receipt):
@@ -425,7 +365,6 @@ class MainWindow(QMainWindow):
                 )
                 return
             self.remove_replaced_image(receipt.image_path, None)
-            self.refresh_filter_options()
             self.filter_receipts()
 
     def open_receipt_image_viewer(self, receipt):

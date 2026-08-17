@@ -59,8 +59,28 @@ def app_stylesheet():
             border: 1px solid #E2E8F0;
             border-radius: 10px;
             color: #334155;
-            font-size: 13px;
-            padding: 7px 10px;
+            font-size: 14px;
+            padding: 10px 12px;
+        }
+
+        QPushButton#filterButton {
+            background-color: #FFFFFF;
+            border: 1px solid #E2E8F0;
+            border-radius: 16px;
+            color: #1E293B;
+            padding: 12px 20px;
+            text-align: center;
+        }
+
+        QPushButton#filterButton:hover {
+            border-color: #2563EB;
+            color: #2563EB;
+        }
+
+        QPushButton#filterButton[filtersActive="yes"] {
+            background-color: #EAF0F8;
+            border-color: #2563EB;
+            color: #2563EB;
         }
 
         QComboBox#filterCombo:focus {
@@ -176,6 +196,46 @@ def app_stylesheet():
             background-color: #FFFFFF;
             border: 1px solid #E2E8F0;
             border-radius: 18px;
+        }
+
+        QFrame#imageSelector {
+            background-color: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            border-radius: 14px;
+        }
+
+        QLabel#imagePreview {
+            background-color: #FFFFFF;
+            border: 1px solid #E2E8F0;
+            border-radius: 8px;
+            color: #94A3B8;
+            font-size: 10px;
+            font-weight: 700;
+        }
+
+        QLabel#imageName {
+            color: #1E293B;
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        QLabel#imageHint {
+            color: #94A3B8;
+            font-size: 12px;
+        }
+
+        QListWidget#exportList {
+            background-color: #FFFFFF;
+            border: 1px solid #E2E8F0;
+            border-radius: 14px;
+            color: #1E293B;
+            font-size: 14px;
+            padding: 6px;
+        }
+
+        QListWidget#exportList::item {
+            border-bottom: 1px solid #F1F5F9;
+            padding: 10px 8px;
         }
 
         QLabel#dashboardMetricLabel,

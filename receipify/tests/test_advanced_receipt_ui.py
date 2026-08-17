@@ -4,7 +4,9 @@ from PyQt6.QtWidgets import QDialog, QMessageBox
 from app.data.data_manager import DataManager
 from app.models.receipt import Receipt
 from app.services import image_service
+from app.services.receipt_browsing_service import default_filters
 from app.ui import main_window
+from app.ui.filter_dialog import FilterDialog
 from app.ui.receipt_dialog import AddReceiptDialog
 from app.ui.receipt_image_viewer import ReceiptImageViewer
 
@@ -46,9 +48,15 @@ def test_edit_and_delete_keep_the_current_browse_state(monkeypatch, qapp, tmp_pa
     add_receipt(data_manager)
     window = main_window.MainWindow(data_manager=data_manager)
     window.search_bar.setText("mouse")
-    window.merchant_filter.setCurrentText("Tech Store")
-    window.category_filter.setCurrentText("Electronics")
-    window.sort_filter.setCurrentText("Price (lowest)")
+    window.filters.update(
+        {
+            "merchant": "Tech Store",
+            "category": "Electronics",
+            "sort_by": "Price (lowest)",
+        }
+    )
+    window.update_filter_button()
+    window.filter_receipts()
     receipt = window.receipt_cards[0].receipt
 
     class AcceptedEditDialog:
@@ -72,16 +80,119 @@ def test_edit_and_delete_keep_the_current_browse_state(monkeypatch, qapp, tmp_pa
     monkeypatch.setattr(main_window, "AddReceiptDialog", AcceptedEditDialog)
     window.open_edit_receipt_dialog(receipt)
     assert window.search_bar.text() == "mouse"
-    assert window.merchant_filter.currentText() == "Tech Store"
-    assert window.category_filter.currentText() == "Electronics"
-    assert window.sort_filter.currentText() == "Price (lowest)"
+    assert window.filters["merchant"] == "Tech Store"
+    assert window.filters["category"] == "Electronics"
+    assert window.filters["sort_by"] == "Price (lowest)"
 
     monkeypatch.setattr(main_window.QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Yes)
     window.confirm_delete_receipt(window.receipt_cards[0].receipt)
     assert window.search_bar.text() == "mouse"
-    assert window.merchant_filter.currentText() == "Tech Store"
-    assert window.category_filter.currentText() == "Electronics"
+    assert window.filters["merchant"] == "Tech Store"
+    assert window.filters["category"] == "Electronics"
     assert window.receipt_cards == []
+    window.close()
+
+
+def test_filter_button_reports_how_many_filters_are_active(qapp, tmp_path):
+    data_manager = DataManager(tmp_path / "receipify-test.db")
+    add_receipt(data_manager)
+    window = main_window.MainWindow(data_manager=data_manager)
+
+    assert window.filter_button.text() == "Filters"
+
+    window.filters.update({"merchant": "Tech Store", "warranty_status": "Active"})
+    window.update_filter_button()
+
+    assert window.filter_button.text() == "Filters (2)"
+
+    window.clear_all_filters()
+
+    assert window.filter_button.text() == "Filters"
+    assert window.filters == default_filters()
+    window.close()
+
+
+def test_applying_the_filter_dialog_updates_the_gallery(monkeypatch, qapp, tmp_path):
+    data_manager = DataManager(tmp_path / "receipify-test.db")
+    add_receipt(data_manager)
+    add_receipt(data_manager, product_name="Blender", merchant_name="HomeGoods")
+    window = main_window.MainWindow(data_manager=data_manager)
+
+    assert len(window.receipt_cards) == 2
+
+    class ApplyingFilterDialog:
+        def __init__(self, filters, merchants, categories, parent):
+            # The dialog is offered exactly the merchants that are in use.
+            assert merchants == ["HomeGoods", "Tech Store"]
+            self.values = {**filters, "merchant": "HomeGoods"}
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(main_window, "FilterDialog", ApplyingFilterDialog)
+    window.open_filter_dialog()
+
+    assert [card.receipt.product_name for card in window.receipt_cards] == ["Blender"]
+    assert window.filter_button.text() == "Filters (1)"
+    window.close()
+
+
+def test_a_cancelled_filter_dialog_changes_nothing(monkeypatch, qapp, tmp_path):
+    data_manager = DataManager(tmp_path / "receipify-test.db")
+    add_receipt(data_manager)
+    window = main_window.MainWindow(data_manager=data_manager)
+
+    class CancelledFilterDialog:
+        values = {**default_filters(), "merchant": "Nowhere"}
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def exec(self):
+            return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(main_window, "FilterDialog", CancelledFilterDialog)
+    window.open_filter_dialog()
+
+    assert window.filters == default_filters()
+    assert len(window.receipt_cards) == 1
+    window.close()
+
+
+def test_the_filter_dialog_round_trips_its_values(qapp):
+    filters = {**default_filters(), "merchant": "Tech Store", "sort_by": "Price (lowest)"}
+    dialog = FilterDialog(filters, merchants=["Tech Store"], categories=["Electronics"])
+
+    assert dialog.merchant_filter.currentText() == "Tech Store"
+    assert dialog.sort_filter.currentText() == "Price (lowest)"
+
+    dialog.category_filter.setCurrentText("Electronics")
+    dialog.purchase_date_from.setText(" 2026-01-01 ")
+    dialog.apply_and_accept()
+
+    assert dialog.values["merchant"] == "Tech Store"
+    assert dialog.values["category"] == "Electronics"
+    assert dialog.values["purchase_date_from"] == "2026-01-01"
+
+    dialog.clear_all()
+
+    assert dialog.collect_values() == default_filters()
+
+
+def test_a_filtered_empty_gallery_offers_a_way_back(qapp, tmp_path):
+    data_manager = DataManager(tmp_path / "receipify-test.db")
+    add_receipt(data_manager)
+    window = main_window.MainWindow(data_manager=data_manager)
+
+    window.search_bar.setText("nothing matches this")
+
+    assert window.receipt_cards == []
+    assert window.clear_filters_button.isHidden() is False
+
+    window.clear_filters_button.click()
+
+    assert window.search_bar.text() == ""
+    assert len(window.receipt_cards) == 1
     window.close()
 
 

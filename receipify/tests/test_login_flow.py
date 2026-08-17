@@ -1,5 +1,5 @@
 import pytest
-from PyQt6.QtWidgets import QDialog
+from PyQt6.QtWidgets import QDialog, QLineEdit
 
 from app.data.data_manager import DataManager
 from app.ui.login_dialog import LoginDialog
@@ -216,6 +216,38 @@ def test_session_controller_uses_one_event_loop_and_returns_to_login_after_logou
     assert controller.window is None
     assert controller.login_dialog is not None
     assert quit_calls == []
+
+
+def test_logging_back_in_after_a_logout_needs_the_password_again(qapp, data_manager):
+    """A logout must leave the same locked login the application boots with."""
+    data_manager.register_user("alice", "password123")
+    controller = SessionController(data_manager, quit_callback=lambda code=0: None)
+    controller.start()
+    controller.login_dialog.username_input.setText("alice")
+    controller.login_dialog.password_input.setText("password123")
+    controller.login_dialog.submit()
+
+    controller.window.logout_button.click()
+    dialog = controller.login_dialog
+
+    # Nothing is carried over, and the password is masked, exactly as on boot.
+    assert dialog.is_registering is False
+    assert dialog.username_input.text() == ""
+    assert dialog.password_input.text() == ""
+    assert dialog.password_input.echoMode() == QLineEdit.EchoMode.Password
+
+    dialog.username_input.setText("alice")
+    dialog.password_input.setText("wrong-password")
+    dialog.submit()
+
+    assert controller.window is None
+    assert controller.login_dialog is dialog
+    assert dialog.error_label.text() == "Incorrect username or password."
+
+    dialog.password_input.setText("password123")
+    dialog.submit()
+
+    assert controller.window is not None
 
 
 def test_session_controller_quits_when_login_is_cancelled(qapp, data_manager):
