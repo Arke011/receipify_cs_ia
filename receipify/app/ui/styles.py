@@ -290,6 +290,29 @@ def app_stylesheet():
             font-weight: 700;
         }
 
+        QFrame#purchaseRow {
+            background-color: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            border-radius: 12px;
+        }
+
+        QLabel#purchaseProduct {
+            color: #1E293B;
+            font-size: 14px;
+            font-weight: 800;
+        }
+
+        QLabel#purchaseMeta {
+            color: #64748B;
+            font-size: 12px;
+        }
+
+        QLabel#purchasePrice {
+            color: #1E293B;
+            font-size: 14px;
+            font-weight: 800;
+        }
+
         QListWidget#exportList {
             background-color: #FFFFFF;
             border: 1px solid #E2E8F0;
@@ -331,6 +354,27 @@ def app_stylesheet():
         QComboBox#chartRangeSelector::drop-down {
             border: none;
             width: 22px;
+        }
+
+        QPushButton#stepButton {
+            background-color: #F1F5F9;
+            border: 1px solid #E2E8F0;
+            border-radius: 9px;
+            color: #334155;
+            font-size: 13px;
+            font-weight: 800;
+            min-width: 0;
+            padding: 4px 12px;
+        }
+
+        QPushButton#stepButton:hover {
+            background-color: #E0EAFC;
+            border-color: #C7D8F5;
+            color: #1D4ED8;
+        }
+
+        QPushButton#stepButton:disabled {
+            color: #CBD5E1;
         }
 
         QLabel#statisticValue {

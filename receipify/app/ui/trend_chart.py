@@ -1,14 +1,18 @@
-"""The spending chart, and the enlarged window it opens into.
+"""The spending chart, and the window that navigates through it.
 
-The chart lives here rather than on the dashboard page because the enlarged
-view draws the same figure, only larger and with the room to be zoomed into.
+Spending is drawn as a bar for each period rather than as a line through
+points. A line joins its points together, which claims a continuity that a set
+of separate purchases does not have; bars stand apart, and a period nothing was
+bought in simply has no bar over its place on the axis. Nothing is invented to
+fill a gap, and no gap has to be closed up to hide one.
 
-Spending is plotted against real dates, not against a row of equally spaced
-month names. A gap in the line is then a gap in time, which is what lets the
-chart leave out the periods nothing was bought in instead of marking them with
-a point that no purchase stands behind.
+The chart is navigated by period rather than by zooming: every view is a named
+stretch of the calendar - all time, a year, a month, a week - which can be
+stepped through and drilled into. There is no way to arrive at a view of
+nothing, which free zooming made both possible and easy.
 """
 
+import calendar
 from datetime import date, timedelta
 
 import matplotlib
@@ -17,18 +21,20 @@ import matplotlib
 # before pyplot-related modules pick an interactive one of their own.
 matplotlib.use("QtAgg")
 
-from matplotlib import dates as mdates
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFontMetrics
 from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -39,36 +45,47 @@ from app.ui.styles import app_stylesheet
 
 
 CARD_BACKGROUND = "#FFFFFF"
-LINE_COLOUR = "#2563EB"
+BAR_COLOUR = "#2563EB"
 GRID_COLOUR = "#E2E8F0"
 AXIS_TEXT_COLOUR = "#64748B"
 
 EMPTY_MESSAGE = "No Spending Data Available"
+EMPTY_PERIOD_MESSAGE = "Nothing was recorded in this period"
 
-DAY = "day"
-MONTH = "month"
+ALL = "all"
 YEAR = "year"
+MONTH = "month"
+WEEK = "week"
+DAY = "day"
 
-# How wide the view has to be before spending is totalled over longer periods.
-# Below a season the days themselves are worth seeing; past a few years the
-# months become too many to tell apart.
-YEARLY_ABOVE_DAYS = 4 * 365
-MONTHLY_ABOVE_DAYS = 120
+# What one bar covers in each view, and the view a bar opens when it is
+# clicked. A day has no narrower period inside it, so clicking one opens the
+# receipts it was added up from instead.
+BARS_IN = {ALL: YEAR, YEAR: MONTH, MONTH: DAY, WEEK: DAY}
+DRILLS_INTO = {ALL: YEAR, YEAR: MONTH}
 
-# A single purchase has no line to read, so its point is given room either side.
-LONE_POINT_PADDING = timedelta(days=15)
-ZOOM_STEP = 1.25
-# Zooming closer than this would land between two days.
-MINIMUM_SPAN = timedelta(days=6)
-# Past this many points the markers merge into the line and only clutter it.
-MAX_MARKED_POINTS = 40
-
-RANGE_OPTIONS = (
-    ("All recorded spending", None),
-    ("Last 12 months", 365),
-    ("Last 6 months", 182),
-    ("Last 30 days", 30),
+SCOPE_OPTIONS = (
+    ("All time", ALL),
+    ("A year at a time", YEAR),
+    ("A month at a time", MONTH),
+    ("A week at a time", WEEK),
 )
+
+# Room one bar label needs before it touches its neighbour.
+LABEL_WIDTH_PX = 52
+AXIS_MARGIN_PX = 90
+# Past this many bars the figures written over them run together.
+MAX_ANNOTATED_BARS = 14
+# A bar keeps a share of the room its period has, up to a width past which it
+# reads as a slab rather than a bar - three years should not fill the panel.
+BAR_SHARE_OF_SLOT = 0.66
+MAX_BAR_WIDTH_PX = 88
+
+# Room a statistics card needs before its figure has to wrap.
+CARD_WIDTH_PX = 176
+
+
+# --------------------------------------------------------------------- periods
 
 
 def parse_date(value):
@@ -90,202 +107,267 @@ def to_dates(daily_spending):
     return dict(sorted(dated.items()))
 
 
-def period_start(day, resolution):
-    """The day, month, or year a date belongs to."""
-    if resolution == YEAR:
+def period_start(day, scope):
+    """The first day of the year, month, or week a date falls in."""
+    if scope == YEAR:
         return date(day.year, 1, 1)
-    if resolution == MONTH:
+    if scope == MONTH:
         return date(day.year, day.month, 1)
+    if scope == WEEK:
+        return day - timedelta(days=day.weekday())
 
     return day
 
 
-def group_spending(spending, resolution):
-    """Total spending over each day, month, or year that holds any.
+def period_end(start, scope):
+    """The last day of a period that begins on a date."""
+    if scope == YEAR:
+        return date(start.year, 12, 31)
+    if scope == MONTH:
+        return date(
+            start.year, start.month, calendar.monthrange(start.year, start.month)[1]
+        )
+    if scope == WEEK:
+        return start + timedelta(days=6)
 
-    Periods with nothing in them are left out rather than carried as zero, so
-    the chart never marks a purchase that was not made.
+    return start
+
+
+def shift_period(start, scope, steps):
+    """The period a number of steps before or after this one."""
+    if scope == YEAR:
+        return date(start.year + steps, 1, 1)
+    if scope == MONTH:
+        months = start.year * 12 + start.month - 1 + steps
+        return date(months // 12, months % 12 + 1, 1)
+    if scope == WEEK:
+        return start + timedelta(weeks=steps)
+
+    return start + timedelta(days=steps)
+
+
+def slots_between(first, last, scope):
+    """Every period from one date to another, however empty some of them are.
+
+    The empty ones are what make the axis a calendar: a month with no receipts
+    keeps its place in the year, and carries no bar to say so.
     """
-    grouped = {}
+    slots = []
+    current = period_start(first, scope)
+    while current <= last:
+        slots.append(current)
+        current = shift_period(current, scope, 1)
+
+    return slots
+
+
+def totals_by_slot(spending, first, last, scope):
+    """``{period: cents}`` across a window, zero where nothing was spent."""
+    totals = {slot: 0 for slot in slots_between(first, last, scope)}
+
     for day, cents in spending.items():
-        period = period_start(day, resolution)
-        grouped[period] = grouped.get(period, 0) + cents
+        slot = period_start(day, scope)
+        if slot in totals:
+            totals[slot] += cents
 
-    return dict(sorted(grouped.items()))
-
-
-def resolution_for_span(span_days):
-    """How finely to total spending for a view of this width."""
-    if span_days > YEARLY_ABOVE_DAYS:
-        return YEAR
-    if span_days > MONTHLY_ABOVE_DAYS:
-        return MONTH
-
-    return DAY
+    return totals
 
 
-def format_period(period, resolution):
-    """A period as it is written in a heading, e.g. ``'Aug 2026'``."""
-    if resolution == YEAR:
-        return period.strftime("%Y")
-    if resolution == MONTH:
-        return period.strftime("%b %Y")
+def yearly_totals(spending):
+    """Every recorded year, as one total each.
 
-    return period.strftime("%d %b %Y")
+    The dashboard panel is a summary: a year to a bar says how spending is
+    going without asking anybody to read a month off a small chart.
+    """
+    if not spending:
+        return {}
+
+    return totals_by_slot(spending, min(spending), max(spending), YEAR)
 
 
-def format_date_range(first, last):
-    """The span a chart covers, e.g. ``'Jul 2025 - Aug 2026'``."""
+def recorded_span(spending):
+    """The months the record runs between, e.g. ``'Jun 2026 - Aug 2026'``."""
+    if not spending:
+        return ""
+
+    return format_slot_span(
+        period_start(min(spending), MONTH), period_start(max(spending), MONTH), MONTH
+    )
+
+
+def format_period(start, scope, recorded=None):
+    """What the view is called, e.g. ``'March 2026'``.
+
+    All time is named after the spending it covers rather than left as a word,
+    so the heading always says which dates are on screen.
+    """
+    if scope == ALL or start is None:
+        if not recorded:
+            return "All time"
+        first, last = recorded
+
+        return f"All time  ·  {first.strftime('%b %Y')} - {last.strftime('%b %Y')}"
+    if scope == YEAR:
+        return start.strftime("%Y")
+    if scope == MONTH:
+        return start.strftime("%B %Y")
+    if scope == WEEK:
+        week_start = period_start(start, WEEK)
+
+        return (
+            f"{week_start.strftime('%d %b')} - "
+            f"{period_end(week_start, WEEK).strftime('%d %b %Y')}"
+        )
+
+    return start.strftime("%d %b %Y")
+
+
+def format_slot(slot, scope):
+    """A period as it is written in a figure, e.g. ``'Aug 2026'``."""
+    if scope == YEAR:
+        return slot.strftime("%Y")
+    if scope == MONTH:
+        return slot.strftime("%b %Y")
+
+    return slot.strftime("%d %b %Y")
+
+
+def format_slot_span(first, last, scope):
+    """The stretch a run of periods covers, e.g. ``'Sep 2025 - Aug 2026'``."""
     if first is None or last is None:
         return ""
-    if (first.year, first.month) == (last.year, last.month):
-        return first.strftime("%b %Y")
+    if first == last:
+        return format_slot(first, scope)
 
-    return f"{first.strftime('%b %Y')} - {last.strftime('%b %Y')}"
-
-
-def periods_within(grouped, first, last):
-    """The totals whose points fall inside a window of dates."""
-    return {period: cents for period, cents in grouped.items() if first <= period <= last}
+    return f"{format_slot(first, scope)} - {format_slot(last, scope)}"
 
 
-def spending_in_periods(spending, periods, resolution):
-    """The purchases behind a set of totals.
+def bar_labels(slots, bar_scope, view_scope=None):
+    """What is written under each bar.
 
-    A month's total is plotted at the start of that month, so a purchase made
-    later in it sits beyond its own point. Picking the purchases out by the
-    period they belong to keeps the two in step: everything counted into a
-    point on screen is counted into the figures for it as well.
+    The year is written under January so that a run of months still reads as a
+    calendar without the year being repeated twelve times over.
     """
-    wanted = set(periods)
+    if bar_scope == YEAR:
+        return [slot.strftime("%Y") for slot in slots]
 
-    return {
-        day: cents
-        for day, cents in spending.items()
-        if period_start(day, resolution) in wanted
-    }
+    if bar_scope == MONTH:
+        return [
+            slot.strftime("%b\n%Y")
+            if index == 0 or slot.month == 1
+            else slot.strftime("%b")
+            for index, slot in enumerate(slots)
+        ]
+
+    if view_scope == WEEK:
+        return [slot.strftime("%a\n%d") for slot in slots]
+
+    return [str(slot.day) for slot in slots]
 
 
-class SpendingChart(FigureCanvasQTAgg):
-    """Spending over time, totalled as finely as the view has room for."""
+def opening_view(spending):
+    """The narrowest view that still holds everything recorded.
 
+    Opening on all time would show a single bar to somebody with a month of
+    receipts, and a year of them to somebody with ten years.
+    """
+    if not spending:
+        return (ALL, None)
+
+    first, last = min(spending), max(spending)
+    if period_start(first, MONTH) == period_start(last, MONTH):
+        return (MONTH, first)
+    if first.year == last.year:
+        return (YEAR, first)
+
+    return (ALL, None)
+
+
+# ----------------------------------------------------------------------- chart
+
+
+class SpendingBarChart(FigureCanvasQTAgg):
+    """Spending as one bar per period, drawn to match the application theme."""
+
+    bar_clicked = pyqtSignal(object)
     enlarge_requested = pyqtSignal()
-    view_changed = pyqtSignal()
 
     def __init__(self, parent=None, interactive=False):
         self.figure = Figure(figsize=(5, 3), dpi=100, facecolor=CARD_BACKGROUND)
         super().__init__(self.figure)
         self.setParent(parent)
-        # Only the enlarged chart is zoomed and panned. The small one is read
-        # as a shape, and opens the enlarged one when it is double-clicked.
+        # The enlarged chart is drilled into by clicking a bar; the small one
+        # opens the enlarged one when it is double-clicked.
         self.interactive = interactive
-        self.spending = {}
-        self.resolution = MONTH
-        self.periods = []
-        self.view = None
-        self.pan_origin = None
-        self.setMinimumHeight(320 if interactive else 260)
+        self.slots = []
+        self.totals = {}
+        self.labels = []
+        self.annotate = False
+        self.label_step = 1
+        self.bar_width = BAR_SHARE_OF_SLOT
+        self.setMinimumHeight(330 if interactive else 250)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-        if not interactive:
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.setToolTip("Double-click to enlarge")
-
-    # -------------------------------------------------------------------- data
-
-    def show_spending(self, daily_spending):
-        """Draw a series of ``{'YYYY-MM-DD': cents}`` over its whole span."""
-        self.spending = to_dates(daily_spending)
-        self.view = self.full_view()
-        self.draw_chart()
-
-    def full_view(self):
-        """The window holding everything, padded when it would be a single point."""
-        if not self.spending:
-            return None
-
-        # The window runs to the points that will be drawn rather than to the
-        # purchase dates behind them: a month's spending is plotted at the
-        # start of that month, and the line should not stop short of the frame.
-        recorded = (max(self.spending) - min(self.spending)).days
-        periods = group_spending(self.spending, self.resolution_for_view(recorded))
-        first, last = min(periods), max(periods)
-        if first == last:
-            return (first - LONE_POINT_PADDING, last + LONE_POINT_PADDING)
-
-        # A margin either side keeps the end points clear of the frame.
-        margin = max((last - first) / 25, timedelta(days=5))
-        return (first - margin, last + margin)
-
-    def visible_periods(self):
-        """The totals currently drawn, keyed by the period each covers."""
-        if self.view is None:
-            return {}
-
-        return periods_within(
-            group_spending(self.spending, self.resolution), *self.view
-        )
-
-    def visible_spending(self):
-        """The purchases behind the points currently drawn."""
-        return spending_in_periods(
-            self.spending, self.visible_periods(), self.resolution
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(
+            "Click a bar to open it" if interactive else "Double-click to enlarge"
         )
 
     # -------------------------------------------------------------------- draw
+
+    def show_totals(self, totals, labels, annotate=False):
+        """Draw ``{period: cents}`` in order, with a label under each bar."""
+        self.totals = dict(totals)
+        self.slots = list(self.totals)
+        self.labels = list(labels)
+        self.annotate = annotate
+        self.draw_chart()
 
     def draw_chart(self):
         self.figure.clear()
         axes = self.figure.add_subplot(111)
         axes.set_facecolor(CARD_BACKGROUND)
 
-        if not self.spending or self.view is None:
-            self.draw_empty_message(axes)
-            self.view_changed.emit()
+        if not self.slots:
+            self.draw_message(axes, EMPTY_MESSAGE)
             return
 
-        first, last = self.view
-        self.resolution = self.resolution_for_view((last - first).days)
-        visible = self.visible_periods()
-        self.periods = list(visible)
-        amounts = [cents / 100 for cents in visible.values()]
-
-        axes.plot(
-            self.periods,
+        amounts = [cents / 100 for cents in self.totals.values()]
+        self.bar_width = self.width_of_bars(len(self.slots))
+        axes.bar(
+            range(len(self.slots)),
             amounts,
-            color=LINE_COLOUR,
-            linewidth=2.2,
-            marker="o" if len(self.periods) <= MAX_MARKED_POINTS else None,
-            markersize=5,
-            markerfacecolor=LINE_COLOUR,
-            markeredgecolor=CARD_BACKGROUND,
+            width=self.bar_width,
+            color=BAR_COLOUR,
+            zorder=2,
         )
-        if self.periods:
-            axes.fill_between(self.periods, amounts, color=LINE_COLOUR, alpha=0.08)
 
         self.style_axes(axes, amounts)
+        if self.annotate and len(self.slots) <= MAX_ANNOTATED_BARS:
+            self.write_amounts(axes, amounts)
+        if not any(amounts):
+            # The axis still shows the period; only the bars are missing. A
+            # scale of its own would be a run of rounded-off zeroes and ones,
+            # so it is left as the single line the bars would have stood on.
+            axes.set_yticks([0])
+            axes.text(
+                0.5,
+                0.5,
+                EMPTY_PERIOD_MESSAGE,
+                horizontalalignment="center",
+                verticalalignment="center",
+                color=AXIS_TEXT_COLOUR,
+                fontsize=10,
+                transform=axes.transAxes,
+            )
+
         self.figure.tight_layout()
         self.draw_idle()
-        self.view_changed.emit()
 
-    def resolution_for_view(self, span_days):
-        """How finely to total spending for the view this chart is showing.
-
-        The small chart never goes down to single days: it is read as a shape,
-        and one point a month keeps that shape the same whether it is covering
-        two months of receipts or two years of them.
-        """
-        resolution = resolution_for_span(span_days)
-        if not self.interactive and resolution == DAY:
-            return MONTH
-
-        return resolution
-
-    def draw_empty_message(self, axes):
+    def draw_message(self, axes, message):
         axes.text(
             0.5,
             0.5,
-            EMPTY_MESSAGE,
+            message,
             horizontalalignment="center",
             verticalalignment="center",
             color=AXIS_TEXT_COLOUR,
@@ -300,161 +382,122 @@ class SpendingChart(FigureCanvasQTAgg):
         label_size = 9 if self.interactive else 8
 
         axes.set_ylabel(
-            f"Spending ({CURRENCY_PREFIX})", color=AXIS_TEXT_COLOUR, fontsize=label_size + 1
+            f"Spending ({CURRENCY_PREFIX})",
+            color=AXIS_TEXT_COLOUR,
+            fontsize=label_size + 1,
         )
         axes.grid(True, axis="y", color=GRID_COLOUR, linewidth=1)
         axes.set_axisbelow(True)
-        axes.tick_params(colors=AXIS_TEXT_COLOUR, labelsize=label_size)
+        axes.tick_params(colors=AXIS_TEXT_COLOUR, labelsize=label_size, length=0)
         axes.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:,.0f}"))
-        for side in ("top", "right"):
+        for side in ("top", "right", "left"):
             axes.spines[side].set_visible(False)
-        for side in ("left", "bottom"):
-            axes.spines[side].set_color(GRID_COLOUR)
+        axes.spines["bottom"].set_color(GRID_COLOUR)
 
-        axes.set_xlim(*self.view)
-        axes.set_ylim(bottom=0, top=(max(amounts) if amounts else 1) * 1.12)
-        self.label_time_axis(axes)
+        axes.set_xlim(-0.7, len(self.slots) - 0.3)
+        # A period with nothing in it still needs a scale to draw its axis on.
+        axes.set_ylim(bottom=0, top=(max(amounts) * 1.16) or 1)
 
-    def label_time_axis(self, axes):
-        """Date labels at the grain the chart is being read at.
+        self.label_step = self.slot_label_step(len(self.slots))
+        ticks = list(range(0, len(self.slots), self.label_step))
+        axes.set_xticks(ticks)
+        axes.set_xticklabels([self.labels[tick] for tick in ticks])
 
-        The small chart is read as a shape rather than looked up month by
-        month, so it keeps a scale of years however long it runs. The enlarged
-        one names the months, then the days, as it is zoomed into them.
-        """
-        if not self.interactive or self.resolution == YEAR:
-            self.label_by_year(axes)
+    def write_amounts(self, axes, amounts):
+        for position, amount in enumerate(amounts):
+            if not amount:
+                continue
+            axes.annotate(
+                f"{amount:,.0f}",
+                (position, amount),
+                textcoords="offset points",
+                xytext=(0, 5),
+                horizontalalignment="center",
+                color=AXIS_TEXT_COLOUR,
+                fontsize=8,
+                fontweight="bold",
+            )
+
+    def width_of_bars(self, slot_count):
+        """How much of its slot a bar fills, as a fraction of the slot."""
+        slot_width_px = max((self.width() - AXIS_MARGIN_PX) / max(slot_count, 1), 1)
+
+        return min(BAR_SHARE_OF_SLOT, MAX_BAR_WIDTH_PX / slot_width_px)
+
+    def slot_label_step(self, slot_count):
+        """Label every nth bar, n chosen so the labels do not overlap."""
+        usable_width = max(self.width() - AXIS_MARGIN_PX, LABEL_WIDTH_PX)
+        room = max(int(usable_width // LABEL_WIDTH_PX), 1)
+
+        # Ceiling division: 31 days into room for 8 labels is every 4th day.
+        return max(-(-slot_count // room), 1)
+
+    # ---------------------------------------------------------------- reactions
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not self.slots:
             return
 
-        axes.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=9))
-        axes.xaxis.set_major_formatter(
-            mdates.DateFormatter("%b %Y" if self.resolution == MONTH else "%d %b")
-        )
+        # Only a change of spacing needs the figure drawn again. Bar widths are
+        # a share of a slot, so they hold their proportions until one is due.
+        outgrown = abs(self.width_of_bars(len(self.slots)) - self.bar_width) > 0.05
+        if outgrown or self.label_step != self.slot_label_step(len(self.slots)):
+            self.draw_chart()
 
-    def label_by_year(self, axes):
-        first, last = self.view
-        # A run of years is marked where each one begins. A view sitting inside
-        # a single year holds no such date, so that year is named once in the
-        # middle rather than the axis being left with no labels at all.
-        starts = [
-            date(year, 1, 1)
-            for year in range(first.year, last.year + 1)
-            if first <= date(year, 1, 1) <= last
-        ]
-        if starts:
-            axes.set_xticks(starts)
-            axes.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
-            return
-
-        middle = first + (last - first) / 2
-        axes.set_xticks([middle])
-        axes.set_xticklabels([str(middle.year)])
-
-    # ---------------------------------------------------------------- zoom, pan
-
-    def zoom(self, factor, focus=None):
-        """Zoom about a date, keeping it where it was under the pointer."""
-        if self.view is None:
-            return
-
-        first, last = self.view
-        focus = focus or first + (last - first) / 2
-        span = (last - first) / factor
-        if span < MINIMUM_SPAN and factor > 1:
-            return
-
-        share = (focus - first) / (last - first)
-        self.set_view(focus - span * share, focus + span * (1 - share))
-
-    def set_view(self, first, last):
-        """Look at a window of dates, kept over the spending that was recorded."""
-        limits = self.full_view()
-        if limits is None:
-            return
-
-        # There is nothing to see on either side of the recorded spending, so
-        # panning and zooming stay within it.
-        span = min(last - first, limits[1] - limits[0])
-        first = max(min(first, limits[1] - span), limits[0])
-        self.view = (first, first + span)
-        self.draw_chart()
-
-    def reset_view(self):
-        self.view = self.full_view()
-        self.draw_chart()
-
-    def date_at(self, position_x):
-        """The date under a point across the canvas, or None if it has none."""
-        if not self.figure.axes or not self.spending:
+    def bar_at(self, position_x):
+        """The period under a point across the canvas, or None if there is none."""
+        if not self.slots or not self.figure.axes:
             return None
 
         axes = self.figure.axes[0]
         x_data, _ = axes.transData.inverted().transform(
             (position_x * self.device_pixel_ratio, 0)
         )
-        try:
-            return mdates.num2date(x_data).date()
-        except (ValueError, OverflowError):
-            return None
+        index = round(x_data)
+        if 0 <= index < len(self.slots) and abs(x_data - index) <= 0.5:
+            return self.slots[index]
 
-    def wheelEvent(self, event):
-        if not self.interactive or self.view is None:
-            super().wheelEvent(event)
-            return
-
-        steps = event.angleDelta().y() / 120
-        if steps:
-            self.zoom(ZOOM_STEP**steps, focus=self.date_at(event.position().x()))
+        return None
 
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
-        if self.interactive and event.button() == Qt.MouseButton.LeftButton:
-            self.pan_origin = (event.position().x(), self.view)
-            self.setCursor(Qt.CursorShape.ClosedHandCursor)
-
-    def mouseMoveEvent(self, event):
-        super().mouseMoveEvent(event)
-        if self.pan_origin is None or self.view is None:
+        if not self.interactive or event.button() != Qt.MouseButton.LeftButton:
             return
 
-        start_x, (first, last) = self.pan_origin
-        grabbed = self.date_at(start_x)
-        now_under = self.date_at(event.position().x())
-        if grabbed is None or now_under is None:
-            return
-
-        # The date the drag started on stays under the pointer.
-        shift = grabbed - now_under
-        self.set_view(first + shift, last + shift)
-
-    def mouseReleaseEvent(self, event):
-        super().mouseReleaseEvent(event)
-        if self.pan_origin is not None:
-            self.pan_origin = None
-            self.setCursor(Qt.CursorShape.ArrowCursor)
+        slot = self.bar_at(event.position().x())
+        if slot is not None:
+            self.bar_clicked.emit(slot)
 
     def mouseDoubleClickEvent(self, event):
         super().mouseDoubleClickEvent(event)
-        if self.interactive:
-            self.reset_view()
-        else:
+        if not self.interactive:
             self.enlarge_requested.emit()
 
 
-class SpendingTrendDialog(QDialog):
-    """The spending chart at full size, zoomable down to single days."""
+# ---------------------------------------------------------------------- window
 
-    def __init__(self, daily_spending, parent=None):
+
+class SpendingTrendDialog(QDialog):
+    """The spending chart at full size, navigated a period at a time."""
+
+    def __init__(self, daily_spending, receipts_by_day=None, parent=None):
         super().__init__(parent)
         self.daily_spending = dict(daily_spending)
+        self.receipts_by_day = dict(receipts_by_day or {})
+        self.spending = to_dates(daily_spending)
+        self.scope, self.anchor = opening_view(self.spending)
         self.setWindowTitle("Spending over time")
         # Without this the window manager offers no way to maximise a dialog.
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
         self.resize(1040, 700)
         self.setMinimumSize(640, 480)
         self.build_ui()
-        self.chart.show_spending(self.daily_spending)
+        self.select_scope_quietly(self.scope)
+        self.refresh()
         self.setStyleSheet(app_stylesheet())
+
+    # ------------------------------------------------------------------ layout
 
     def build_ui(self):
         root = QWidget()
@@ -468,9 +511,9 @@ class SpendingTrendDialog(QDialog):
         title.setObjectName("dialogTitle")
         root_layout.addWidget(title)
 
-        self.range_label = QLabel()
-        self.range_label.setObjectName("dialogSubtitle")
-        root_layout.addWidget(self.range_label)
+        self.period_label = QLabel()
+        self.period_label.setObjectName("dialogSubtitle")
+        root_layout.addWidget(self.period_label)
 
         root_layout.addLayout(self.build_controls())
 
@@ -478,8 +521,8 @@ class SpendingTrendDialog(QDialog):
         panel.setObjectName("dashboardPanel")
         panel_layout = QVBoxLayout(panel)
         panel_layout.setContentsMargins(18, 16, 18, 16)
-        self.chart = SpendingChart(interactive=True)
-        self.chart.view_changed.connect(self.describe_view)
+        self.chart = SpendingBarChart(interactive=True)
+        self.chart.bar_clicked.connect(self.drill_into)
         panel_layout.addWidget(self.chart)
         root_layout.addWidget(panel, stretch=1)
 
@@ -492,28 +535,34 @@ class SpendingTrendDialog(QDialog):
     def build_controls(self):
         controls = QHBoxLayout()
         controls.setSpacing(10)
-        # The row runs from the same edge as the heading above it, rather than
-        # being pushed in by a label of its own.
+        # The row runs from the same edge as the heading above it.
         controls.setContentsMargins(0, 0, 0, 0)
 
-        self.range_selector = QComboBox()
-        self.range_selector.setObjectName("chartRangeSelector")
-        for label, days in RANGE_OPTIONS:
-            self.range_selector.addItem(label, days)
-        self.range_selector.currentIndexChanged.connect(self.show_selected_range)
-        controls.addWidget(self.range_selector)
+        self.scope_selector = QComboBox()
+        self.scope_selector.setObjectName("chartRangeSelector")
+        for label, scope in SCOPE_OPTIONS:
+            self.scope_selector.addItem(label, scope)
+        self.scope_selector.currentIndexChanged.connect(self.change_scope)
+        controls.addWidget(self.scope_selector)
 
-        self.reset_button = QPushButton("Reset zoom")
-        self.reset_button.setObjectName("panelActionButton")
-        self.reset_button.clicked.connect(self.reset_view)
-        controls.addWidget(self.reset_button)
+        self.previous_button = self.add_step_button(controls, "◀", -1, "Earlier")
+        self.next_button = self.add_step_button(controls, "▶", 1, "Later")
 
-        hint = QLabel("Scroll to zoom  ·  drag to move  ·  double-click to reset")
+        hint = QLabel("Click a bar to open it  ·  click a day to see what was bought")
         hint.setObjectName("panelCaption")
         controls.addWidget(hint)
         controls.addStretch(1)
 
         return controls
+
+    def add_step_button(self, layout, arrow, direction, tooltip):
+        button = QPushButton(arrow)
+        button.setObjectName("stepButton")
+        button.setToolTip(tooltip)
+        button.clicked.connect(lambda: self.step(direction))
+        layout.addWidget(button)
+
+        return button
 
     def build_buttons(self):
         button_row = QHBoxLayout()
@@ -539,43 +588,110 @@ class SpendingTrendDialog(QDialog):
 
         return button_row
 
-    # ------------------------------------------------------------------ content
+    # -------------------------------------------------------------- navigation
 
-    def show_selected_range(self):
-        days = self.range_selector.currentData()
-        if days is None or not self.chart.spending:
-            self.chart.reset_view()
-            return
+    def recorded_range(self):
+        if not self.spending:
+            return None
 
-        last = max(self.chart.spending)
-        self.chart.set_view(last - timedelta(days=days), last)
+        return (min(self.spending), max(self.spending))
 
-    def reset_view(self):
-        # Setting the range back to everything redraws through the same path.
-        if self.range_selector.currentIndex() == 0:
-            self.chart.reset_view()
-        else:
-            self.range_selector.setCurrentIndex(0)
+    def bounds(self):
+        """The first and last day the view covers."""
+        if self.scope == ALL or self.anchor is None:
+            return self.recorded_range()
 
-    def describe_view(self):
-        visible = self.chart.visible_spending()
-        if not visible:
-            self.range_label.setText("Nothing has been recorded yet.")
-            self.statistics_button.setEnabled(False)
-            return
-
-        self.range_label.setText(
-            f"{format_date_range(min(visible), max(visible))}"
-            f"  ·  totalled by {self.chart.resolution}"
+        return (
+            period_start(self.anchor, self.scope),
+            period_end(period_start(self.anchor, self.scope), self.scope),
         )
-        self.statistics_button.setEnabled(True)
+
+    def current_totals(self):
+        bounds = self.bounds()
+        if bounds is None:
+            return {}
+
+        return totals_by_slot(self.spending, *bounds, BARS_IN[self.scope])
+
+    def refresh(self):
+        totals = self.current_totals()
+        self.chart.show_totals(
+            totals,
+            bar_labels(list(totals), BARS_IN[self.scope], self.scope),
+            annotate=True,
+        )
+        self.period_label.setText(
+            format_period(self.anchor, self.scope, self.recorded_range())
+            if self.spending
+            else "Nothing has been recorded yet."
+        )
+        self.statistics_button.setEnabled(bool(self.spending))
+        self.previous_button.setEnabled(self.can_step(-1))
+        self.next_button.setEnabled(self.can_step(1))
+
+    def can_step(self, direction):
+        """Whether any recorded spending lies the other side of this view."""
+        recorded = self.recorded_range()
+        if recorded is None or self.scope == ALL or self.anchor is None:
+            return False
+
+        start = period_start(self.anchor, self.scope)
+        if direction > 0:
+            return recorded[1] > period_end(start, self.scope)
+
+        return recorded[0] < start
+
+    def step(self, direction):
+        if not self.can_step(direction):
+            return
+
+        self.anchor = shift_period(
+            period_start(self.anchor, self.scope), self.scope, direction
+        )
+        self.refresh()
+
+    def change_scope(self):
+        scope = self.scope_selector.currentData()
+        if scope == self.scope:
+            return
+
+        self.scope = scope
+        # Widening or narrowing keeps a date that is already on screen in view.
+        if scope != ALL and self.anchor is None:
+            self.anchor = max(self.spending) if self.spending else date.today()
+        self.refresh()
+
+    def drill_into(self, slot):
+        """Open what a bar holds: a narrower period, or the day's receipts."""
+        narrower = DRILLS_INTO.get(self.scope)
+        if narrower is None:
+            self.show_purchases(slot)
+            return
+
+        self.scope = narrower
+        self.anchor = slot
+        self.select_scope_quietly(narrower)
+        self.refresh()
+
+    def show_purchases(self, day):
+        """List the receipts a day's bar was added up from."""
+        PurchasesDialog(day, self.receipts_by_day.get(day.isoformat(), []), parent=self).exec()
+
+    def select_scope_quietly(self, scope):
+        """Keep the selector in step with a view reached by clicking a bar."""
+        self.scope_selector.blockSignals(True)
+        self.scope_selector.setCurrentIndex(self.scope_selector.findData(scope))
+        self.scope_selector.blockSignals(False)
 
     def open_statistics(self):
         StatisticsDialog(
-            self.chart.visible_spending(), self.chart.resolution, parent=self
+            self.current_totals(),
+            BARS_IN[self.scope],
+            format_period(self.anchor, self.scope, self.recorded_range()),
+            parent=self,
         ).exec()
 
-    # ---------------------------------------------------------------- full screen
+    # -------------------------------------------------------------- full screen
 
     def toggle_full_screen(self):
         if self.isFullScreen():
@@ -591,18 +707,132 @@ class SpendingTrendDialog(QDialog):
         if event.key() == Qt.Key.Key_Escape and self.isFullScreen():
             self.toggle_full_screen()
             return
+        if event.key() == Qt.Key.Key_Left:
+            self.step(-1)
+            return
+        if event.key() == Qt.Key.Key_Right:
+            self.step(1)
+            return
+
         super().keyPressEvent(event)
 
 
-class StatisticsDialog(QDialog):
-    """The figures behind the stretch of chart on screen, a card to each."""
+class PurchasesDialog(QDialog):
+    """What was actually bought on one day, behind that day's bar."""
 
-    def __init__(self, visible_spending, resolution, parent=None):
+    def __init__(self, day, receipts, parent=None):
         super().__init__(parent)
-        self.visible_spending = dict(visible_spending)
-        self.resolution = resolution
+        self.day = day
+        self.receipts = list(receipts)
+        self.setWindowTitle("Purchases")
+        self.setMinimumWidth(560)
+        self.build_ui()
+        self.setStyleSheet(app_stylesheet())
+
+    def build_ui(self):
+        root = QWidget()
+        root.setObjectName("dialogRoot")
+
+        root_layout = QVBoxLayout(root)
+        root_layout.setContentsMargins(26, 24, 26, 24)
+        root_layout.setSpacing(14)
+
+        title = QLabel(self.day.strftime("%d %B %Y"))
+        title.setObjectName("dialogTitle")
+        root_layout.addWidget(title)
+
+        subtitle = QLabel(self.describe_day())
+        subtitle.setObjectName("dialogSubtitle")
+        root_layout.addWidget(subtitle)
+
+        root_layout.addWidget(self.build_list(), stretch=1)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        close_button = QPushButton("Close")
+        close_button.setObjectName("primaryButton")
+        close_button.setDefault(True)
+        close_button.clicked.connect(self.accept)
+        button_row.addWidget(close_button)
+        root_layout.addLayout(button_row)
+
+        dialog_layout = QVBoxLayout(self)
+        dialog_layout.setContentsMargins(0, 0, 0, 0)
+        dialog_layout.addWidget(root)
+
+    def build_list(self):
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setObjectName("deadlineScrollArea")
+        scroll_area.setMinimumHeight(180)
+
+        content = QWidget()
+        content.setObjectName("deadlineContent")
+        layout = QVBoxLayout(content)
+        # A right margin keeps the prices clear of the scrollbar.
+        layout.setContentsMargins(0, 0, 16, 0)
+        layout.setSpacing(8)
+
+        for receipt in self.receipts:
+            layout.addWidget(self.build_row(receipt))
+        if not self.receipts:
+            empty = QLabel("Nothing was bought on this day.")
+            empty.setObjectName("dashboardEmpty")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(empty)
+        layout.addStretch(1)
+
+        scroll_area.setWidget(content)
+        return scroll_area
+
+    @staticmethod
+    def build_row(receipt):
+        row = QFrame()
+        row.setObjectName("purchaseRow")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(12)
+
+        details = QVBoxLayout()
+        details.setSpacing(2)
+        layout.addLayout(details, stretch=1)
+
+        product = QLabel(receipt.product_name)
+        product.setObjectName("purchaseProduct")
+        product.setWordWrap(True)
+        details.addWidget(product)
+
+        meta = QLabel(f"{receipt.merchant_name}  ·  {receipt.category_name}")
+        meta.setObjectName("purchaseMeta")
+        meta.setWordWrap(True)
+        details.addWidget(meta)
+
+        price = QLabel(format_currency(receipt.price_cents))
+        price.setObjectName("purchasePrice")
+        layout.addWidget(price)
+
+        return row
+
+    def describe_day(self):
+        if not self.receipts:
+            return "This day has no receipts against it."
+
+        total = sum(receipt.price_cents for receipt in self.receipts)
+        counted = "purchase" if len(self.receipts) == 1 else "purchases"
+
+        return f"{len(self.receipts)} {counted}  ·  {format_currency(total)} in total"
+
+
+class StatisticsDialog(QDialog):
+    """The figures behind the period on screen, a card to each."""
+
+    def __init__(self, totals, scope, period_name, parent=None):
+        super().__init__(parent)
+        self.totals = dict(totals)
+        self.scope = scope
+        self.period_name = period_name
         self.setWindowTitle("Statistics")
-        self.setMinimumWidth(620)
+        self.setMinimumWidth(4 * CARD_WIDTH_PX + 90)
         self.build_ui()
         self.setStyleSheet(app_stylesheet())
 
@@ -626,9 +856,12 @@ class StatisticsDialog(QDialog):
         cards = QHBoxLayout()
         cards.setSpacing(14)
         root_layout.addLayout(cards)
-        self.card_values = [
-            self.add_card(cards, label, value) for label, value in self.figures()
-        ]
+        self.card_labels = []
+        self.card_values = []
+        for label_text, value_text in self.figures():
+            label, value = self.add_card(cards, label_text, value_text)
+            self.card_labels.append(label)
+            self.card_values.append(value)
 
         button_row = QHBoxLayout()
         button_row.addStretch(1)
@@ -645,8 +878,10 @@ class StatisticsDialog(QDialog):
 
     @staticmethod
     def add_card(layout, label_text, value_text):
+        """One figure, as a card. Returns its label and value to be measured."""
         card = QFrame()
         card.setObjectName("dashboardSummaryCard")
+        card.setMinimumWidth(CARD_WIDTH_PX)
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(18, 16, 18, 16)
         card_layout.setSpacing(6)
@@ -654,43 +889,69 @@ class StatisticsDialog(QDialog):
         label = QLabel(label_text)
         label.setObjectName("dashboardMetricLabel")
         label.setWordWrap(True)
+        label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         card_layout.addWidget(label)
 
         value = QLabel(value_text)
         value.setObjectName("statisticValue")
-        value.setWordWrap(True)
+        # Figures are written on one line: a wrapped amount reads as two.
+        value.setWordWrap(False)
         card_layout.addWidget(value)
 
         layout.addWidget(card, stretch=1)
-        return value
+        return label, value
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # The stylesheet's fonts only reach these labels when the dialog is
+        # polished, and the sizes they reported before that were measured in
+        # the default font. Both are settled here, once the figures are as
+        # large as they are going to be.
+        for label in self.card_labels:
+            # Two lines of room whether a label needs them or not, so one that
+            # wraps cannot push its own figure out of line with the others.
+            label.setFixedHeight(2 * QFontMetrics(label.font()).height())
+        for value in self.card_values:
+            value.setMinimumWidth(
+                QFontMetrics(value.font()).horizontalAdvance(value.text())
+            )
+
+        for layout in self.findChildren(QLayout):
+            layout.invalidate()
+        self.layout().activate()
+        self.resize(self.sizeHint())
 
     def describe_period(self):
-        if not self.visible_spending:
-            return "There is nothing on the chart to report on."
+        if not self.spent_slots():
+            return f"Nothing was recorded in {self.period_name}."
 
-        span = format_date_range(min(self.visible_spending), max(self.visible_spending))
-        return f"Everything on the chart right now: {span}."
+        return f"Everything on the chart right now: {self.period_name}."
+
+    def spent_slots(self):
+        """The periods that hold spending, the empty ones left out."""
+        return {slot: cents for slot, cents in self.totals.items() if cents}
 
     def figures(self):
         """The four figures, each as one card's label and value."""
-        if not self.visible_spending:
+        spent = self.spent_slots()
+        if not spent:
             return [("Total spending", format_currency(0))]
 
-        grouped = group_spending(self.visible_spending, self.resolution)
-        total_cents = sum(grouped.values())
-        highest = max(grouped, key=grouped.get)
-        counted = f"{self.resolution}s" if len(grouped) != 1 else self.resolution
+        total_cents = sum(spent.values())
+        highest = max(spent, key=spent.get)
+        counted = f"{self.scope}s" if len(spent) != 1 else self.scope
 
         return [
             ("Total spending", format_currency(total_cents)),
-            (f"{counted.capitalize()} with spending", str(len(grouped))),
+            (f"{counted.capitalize()} with spending", str(len(spent))),
             (
-                f"Average per {self.resolution}",
-                format_currency(round(total_cents / len(grouped))),
+                f"Average per {self.scope}",
+                format_currency(round(total_cents / len(spent))),
             ),
             (
-                f"Highest {self.resolution}",
-                f"{format_period(highest, self.resolution)}\n"
-                f"{format_currency(grouped[highest])}",
+                # The date is put on its own line rather than left to wrap
+                # wherever it happens to run out of card.
+                f"Highest {self.scope}\n({format_slot(highest, self.scope)})",
+                format_currency(spent[highest]),
             ),
         ]

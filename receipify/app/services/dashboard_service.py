@@ -156,6 +156,25 @@ class DashboardService:
         """
         return build_daily_spending(self._receipts(user_id))
 
+    def get_receipts_by_day(self, user_id) -> dict[str, list[Receipt]]:
+        """The receipts themselves, grouped by the date they were bought on.
+
+        The chart totals a day into one bar; this is what that bar was added
+        up from, for when the total on its own does not say enough.
+        """
+        by_day = {}
+
+        for receipt in self._receipts(user_id):
+            if _purchase_month(receipt.purchase_date) is None:
+                continue
+            by_day.setdefault(receipt.purchase_date, []).append(receipt)
+
+        for receipts in by_day.values():
+            # Dearest first: the big purchase is the one a day is remembered by.
+            receipts.sort(key=lambda item: (-item.price_cents, item.product_name.casefold()))
+
+        return dict(sorted(by_day.items()))
+
     def get_upcoming_deadlines(self, user_id, days=DEFAULT_DEADLINE_DAYS) -> list[ExpiryItem]:
         """Warranty and return periods needing attention, soonest deadline first.
 

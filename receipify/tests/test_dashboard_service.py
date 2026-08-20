@@ -84,6 +84,24 @@ def test_daily_spending_leaves_out_a_date_it_cannot_read(service):
     assert service.get_daily_spending(1) == {"2026-08-15": 2499}
 
 
+def test_receipts_are_grouped_by_the_day_they_were_bought_dearest_first(service):
+    store_receipt(service, "Mouse", 2499, "2026-08-15")
+    store_receipt(service, "Blender", 8000, "2026-08-15")
+    store_receipt(service, "Cable", 999, "2026-06-30")
+
+    by_day = service.get_receipts_by_day(1)
+
+    assert list(by_day) == ["2026-06-30", "2026-08-15"]
+    assert [receipt.product_name for receipt in by_day["2026-08-15"]] == ["Blender", "Mouse"]
+
+
+def test_a_receipt_with_an_unreadable_date_belongs_to_no_day(service):
+    store_receipt(service, "Mouse", 2499, "2026-08-15")
+    store_receipt(service, "Mystery", 500, "not-a-date")
+
+    assert list(service.get_receipts_by_day(1)) == ["2026-08-15"]
+
+
 def test_upcoming_deadlines_are_within_the_window_and_soonest_first(service):
     today = date.today()
     store_receipt(
@@ -112,6 +130,7 @@ def test_every_metric_handles_an_empty_account(service):
     assert service.get_category_spending(1) == {}
     assert service.get_monthly_spending(1) == {}
     assert service.get_daily_spending(1) == {}
+    assert service.get_receipts_by_day(1) == {}
     assert service.get_upcoming_deadlines(1) == []
 
 

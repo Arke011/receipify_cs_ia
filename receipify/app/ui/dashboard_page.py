@@ -16,10 +16,13 @@ from PyQt6.QtWidgets import (
 from app.services.dashboard_service import DashboardService
 from app.ui.formatting import format_currency
 from app.ui.trend_chart import (
-    SpendingChart,
+    YEAR,
+    SpendingBarChart,
     SpendingTrendDialog,
-    format_date_range,
-    parse_date,
+    bar_labels,
+    recorded_span,
+    to_dates,
+    yearly_totals,
 )
 
 
@@ -89,6 +92,8 @@ class DashboardPage(QWidget):
         self.user_id = user_id
         self.service = DashboardService(data_manager)
         self.daily_spending = {}
+        self.receipts_by_day = {}
+        self.yearly_totals = {}
         self.build_ui()
         self.refresh()
 
@@ -158,7 +163,7 @@ class DashboardPage(QWidget):
 
         self.enlarge_button = QPushButton("Enlarge")
         self.enlarge_button.setObjectName("panelActionButton")
-        self.enlarge_button.setToolTip("Open the chart in a window that can be zoomed into")
+        self.enlarge_button.setToolTip("Open the chart in a window you can look through")
         self.enlarge_button.clicked.connect(self.open_trend_dialog)
 
         # The span the chart covers is stated rather than left to be read off
@@ -169,7 +174,7 @@ class DashboardPage(QWidget):
         trend_panel, trend_layout = self.create_panel(
             "Spending over time", actions=(self.trend_range_label, self.enlarge_button)
         )
-        self.trend_chart = SpendingChart()
+        self.trend_chart = SpendingBarChart()
         self.trend_chart.enlarge_requested.connect(self.open_trend_dialog)
         trend_layout.addWidget(self.trend_chart)
         split_row.addWidget(trend_panel, stretch=3)
@@ -181,7 +186,9 @@ class DashboardPage(QWidget):
 
     def open_trend_dialog(self):
         """Show the chart at full size, where it can be zoomed into."""
-        SpendingTrendDialog(self.daily_spending, parent=self).exec()
+        SpendingTrendDialog(
+            self.daily_spending, receipts_by_day=self.receipts_by_day, parent=self
+        ).exec()
 
     def build_deadlines_section(self):
         panel, panel_layout = self.create_panel("Upcoming deadlines (next 30 days)")
@@ -238,18 +245,24 @@ class DashboardPage(QWidget):
         self.expired_records_value.setText(str(counts["expired"]))
 
         self.daily_spending = self.service.get_daily_spending(self.user_id)
-        self.trend_chart.show_spending(self.daily_spending)
-        self.trend_range_label.setText(self.describe_recorded_span())
+        self.receipts_by_day = self.service.get_receipts_by_day(self.user_id)
+        self.show_yearly_bars()
         self.enlarge_button.setEnabled(bool(self.daily_spending))
         self.show_category_spending(self.service.get_category_spending(self.user_id))
         self.show_deadlines(self.service.get_upcoming_deadlines(self.user_id))
 
-    def describe_recorded_span(self):
-        """The dates the chart covers, for the caption beside its heading."""
-        days = [parse_date(day) for day in self.daily_spending]
-        days = [day for day in days if day is not None]
+    def show_yearly_bars(self):
+        """A bar for each recorded year.
 
-        return format_date_range(min(days), max(days)) if days else ""
+        The panel is a summary; the enlarged window is where a year is opened
+        up into its months and days.
+        """
+        spending = to_dates(self.daily_spending)
+        self.yearly_totals = yearly_totals(spending)
+        self.trend_chart.show_totals(
+            self.yearly_totals, bar_labels(list(self.yearly_totals), YEAR)
+        )
+        self.trend_range_label.setText(recorded_span(spending))
 
     def show_category_spending(self, category_spending):
         self.clear_layout(self.category_layout)

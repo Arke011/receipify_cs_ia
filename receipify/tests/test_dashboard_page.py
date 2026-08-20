@@ -272,7 +272,7 @@ def test_an_empty_account_shows_placeholders_instead_of_broken_charts(qapp, tmp_
     assert chart_texts == ["No Spending Data Available"]
 
 
-def test_the_chart_plots_only_the_months_that_hold_receipts(qapp, tmp_path):
+def test_the_panel_totals_the_record_a_year_to_a_bar(qapp, tmp_path):
     from datetime import date
 
     page = build_page(
@@ -281,15 +281,24 @@ def test_the_chart_plots_only_the_months_that_hold_receipts(qapp, tmp_path):
             receipt_values("Mouse", 2499, "2026-08-15"),
             receipt_values("Cable", 1000, "2026-08-02"),
             receipt_values("Blender", 8000, "2026-06-30"),
+            receipt_values("Kettle", 4000, "2024-03-30"),
         ],
     )
 
-    line = page.trend_chart.figure.axes[0].lines[0]
+    heights = dict(
+        zip(
+            page.trend_chart.slots,
+            [patch.get_height() for patch in page.trend_chart.figure.axes[0].patches],
+        )
+    )
 
-    # Nothing was bought in July, so July carries no point. The line runs
-    # across the gap, which the dates on the axis show as a gap in time.
-    assert page.trend_chart.periods == [date(2026, 6, 1), date(2026, 8, 1)]
-    assert list(line.get_ydata()) == [80.0, 34.99]
+    # A year to a bar, with 2025 keeping its place between the two years that
+    # hold receipts.
+    assert heights == {
+        date(2024, 1, 1): 40.0,
+        date(2025, 1, 1): 0.0,
+        date(2026, 1, 1): 114.99,
+    }
 
 
 def test_the_chart_panel_states_the_span_it_covers(qapp, tmp_path):
@@ -301,15 +310,16 @@ def test_the_chart_panel_states_the_span_it_covers(qapp, tmp_path):
         ],
     )
 
+    # The caption names the months the receipts themselves run between.
     assert page.trend_range_label.text() == "Jun 2026 - Aug 2026"
     assert page.enlarge_button.isEnabled()
 
 
-def test_the_small_chart_is_scaled_in_years(qapp, tmp_path):
+def test_the_panel_bars_are_labelled_by_year(qapp, tmp_path):
     page = build_page(
         tmp_path,
         [
-            receipt_values("Blender", 8000, "2026-06-30"),
+            receipt_values("Kettle", 4000, "2025-03-30"),
             receipt_values("Mouse", 2499, "2026-08-15"),
         ],
     )
@@ -318,7 +328,7 @@ def test_the_small_chart_is_scaled_in_years(qapp, tmp_path):
         label.get_text() for label in page.trend_chart.figure.axes[0].get_xticklabels()
     ]
 
-    assert labels == ["2026"]
+    assert labels == ["2025", "2026"]
 
 
 def test_the_enlarge_button_is_dead_until_there_is_something_to_show(qapp, tmp_path):
