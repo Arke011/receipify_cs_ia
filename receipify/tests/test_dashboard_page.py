@@ -272,7 +272,9 @@ def test_an_empty_account_shows_placeholders_instead_of_broken_charts(qapp, tmp_
     assert chart_texts == ["No Spending Data Available"]
 
 
-def test_the_chart_plots_one_point_per_month_including_empty_ones(qapp, tmp_path):
+def test_the_chart_plots_only_the_months_that_hold_receipts(qapp, tmp_path):
+    from datetime import date
+
     page = build_page(
         tmp_path,
         [
@@ -284,10 +286,10 @@ def test_the_chart_plots_one_point_per_month_including_empty_ones(qapp, tmp_path
 
     line = page.trend_chart.figure.axes[0].lines[0]
 
-    # July holds no receipts, so it is plotted as zero instead of joining June
-    # straight onto August as though the two were neighbouring months.
-    assert page.trend_chart.months == ["2026-06", "2026-07", "2026-08"]
-    assert list(line.get_ydata()) == [80.0, 0.0, 34.99]
+    # Nothing was bought in July, so July carries no point. The line runs
+    # across the gap, which the dates on the axis show as a gap in time.
+    assert page.trend_chart.periods == [date(2026, 6, 1), date(2026, 8, 1)]
+    assert list(line.get_ydata()) == [80.0, 34.99]
 
 
 def test_the_chart_panel_states_the_span_it_covers(qapp, tmp_path):
@@ -303,13 +305,29 @@ def test_the_chart_panel_states_the_span_it_covers(qapp, tmp_path):
     assert page.enlarge_button.isEnabled()
 
 
+def test_the_small_chart_is_scaled_in_years(qapp, tmp_path):
+    page = build_page(
+        tmp_path,
+        [
+            receipt_values("Blender", 8000, "2026-06-30"),
+            receipt_values("Mouse", 2499, "2026-08-15"),
+        ],
+    )
+
+    labels = [
+        label.get_text() for label in page.trend_chart.figure.axes[0].get_xticklabels()
+    ]
+
+    assert labels == ["2026"]
+
+
 def test_the_enlarge_button_is_dead_until_there_is_something_to_show(qapp, tmp_path):
     page = build_page(tmp_path)
 
     assert page.enlarge_button.isEnabled() is False
 
 
-def test_enlarging_opens_the_chart_over_the_same_months(qapp, tmp_path, monkeypatch):
+def test_enlarging_opens_the_chart_over_the_same_spending(qapp, tmp_path, monkeypatch):
     page = build_page(
         tmp_path,
         [
@@ -318,14 +336,16 @@ def test_enlarging_opens_the_chart_over_the_same_months(qapp, tmp_path, monkeypa
         ],
     )
     opened = []
-    # exec() would block on a modal window, so the dialog is only shown.
+    # exec() would block on a modal window, so the dialog is only built.
     monkeypatch.setattr(SpendingTrendDialog, "exec", lambda dialog: opened.append(dialog))
 
     page.enlarge_button.click()
 
     assert len(opened) == 1
-    assert opened[0].chart.months == ["2026-06", "2026-07", "2026-08"]
-    assert opened[0].chart.detailed is True
+    # The enlarged window is handed the daily figures, which is what lets it
+    # sharpen from months to days as it is zoomed in.
+    assert opened[0].daily_spending == {"2026-06-30": 8000, "2026-08-15": 2499}
+    assert opened[0].chart.interactive is True
 
 
 def test_the_dashboard_updates_when_receipts_change(monkeypatch, qapp, tmp_path):

@@ -15,7 +15,12 @@ from PyQt6.QtWidgets import (
 
 from app.services.dashboard_service import DashboardService
 from app.ui.formatting import format_currency
-from app.ui.trend_chart import MonthlyTrendChart, SpendingTrendDialog, format_month_range
+from app.ui.trend_chart import (
+    SpendingChart,
+    SpendingTrendDialog,
+    format_date_range,
+    parse_date,
+)
 
 
 # The bar is drawn in tenths of a percent so that it matches the share printed
@@ -83,7 +88,7 @@ class DashboardPage(QWidget):
         self.data_manager = data_manager
         self.user_id = user_id
         self.service = DashboardService(data_manager)
-        self.monthly_timeline = {}
+        self.daily_spending = {}
         self.build_ui()
         self.refresh()
 
@@ -153,7 +158,7 @@ class DashboardPage(QWidget):
 
         self.enlarge_button = QPushButton("Enlarge")
         self.enlarge_button.setObjectName("panelActionButton")
-        self.enlarge_button.setToolTip("Open the chart in a resizable window")
+        self.enlarge_button.setToolTip("Open the chart in a window that can be zoomed into")
         self.enlarge_button.clicked.connect(self.open_trend_dialog)
 
         # The span the chart covers is stated rather than left to be read off
@@ -162,9 +167,9 @@ class DashboardPage(QWidget):
         self.trend_range_label.setObjectName("panelCaption")
 
         trend_panel, trend_layout = self.create_panel(
-            "Monthly spending trend", actions=(self.trend_range_label, self.enlarge_button)
+            "Spending over time", actions=(self.trend_range_label, self.enlarge_button)
         )
-        self.trend_chart = MonthlyTrendChart()
+        self.trend_chart = SpendingChart()
         self.trend_chart.enlarge_requested.connect(self.open_trend_dialog)
         trend_layout.addWidget(self.trend_chart)
         split_row.addWidget(trend_panel, stretch=3)
@@ -175,8 +180,8 @@ class DashboardPage(QWidget):
         return split_row
 
     def open_trend_dialog(self):
-        """Show the chart at full size, where a longer history stays readable."""
-        SpendingTrendDialog(self.monthly_timeline, parent=self).exec()
+        """Show the chart at full size, where it can be zoomed into."""
+        SpendingTrendDialog(self.daily_spending, parent=self).exec()
 
     def build_deadlines_section(self):
         panel, panel_layout = self.create_panel("Upcoming deadlines (next 30 days)")
@@ -232,12 +237,19 @@ class DashboardPage(QWidget):
         self.active_warranties_value.setText(str(counts["active"]))
         self.expired_records_value.setText(str(counts["expired"]))
 
-        self.monthly_timeline = self.service.get_monthly_timeline(self.user_id)
-        self.trend_chart.plot(self.monthly_timeline)
-        self.trend_range_label.setText(format_month_range(list(self.monthly_timeline)))
-        self.enlarge_button.setEnabled(bool(self.monthly_timeline))
+        self.daily_spending = self.service.get_daily_spending(self.user_id)
+        self.trend_chart.show_spending(self.daily_spending)
+        self.trend_range_label.setText(self.describe_recorded_span())
+        self.enlarge_button.setEnabled(bool(self.daily_spending))
         self.show_category_spending(self.service.get_category_spending(self.user_id))
         self.show_deadlines(self.service.get_upcoming_deadlines(self.user_id))
+
+    def describe_recorded_span(self):
+        """The dates the chart covers, for the caption beside its heading."""
+        days = [parse_date(day) for day in self.daily_spending]
+        days = [day for day in days if day is not None]
+
+        return format_date_range(min(days), max(days)) if days else ""
 
     def show_category_spending(self, category_spending):
         self.clear_layout(self.category_layout)

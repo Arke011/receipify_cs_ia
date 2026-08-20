@@ -4,11 +4,7 @@ import pytest
 
 from app.data.data_manager import DataManager
 from app.models.receipt import Receipt
-from app.services.dashboard_service import (
-    DashboardService,
-    build_dashboard_summary,
-    fill_month_gaps,
-)
+from app.services.dashboard_service import DashboardService, build_dashboard_summary
 
 
 @pytest.fixture
@@ -72,44 +68,20 @@ def test_monthly_spending_is_grouped_and_ordered_by_month(service):
     assert service.get_monthly_spending(1) == {"2026-06": 8000, "2026-08": 3499}
 
 
-def test_the_monthly_timeline_carries_the_months_in_between(service):
+def test_daily_spending_totals_each_purchase_date(service):
     store_receipt(service, "Mouse", 2499, "2026-08-15")
+    store_receipt(service, "Cable", 1000, "2026-08-15")
     store_receipt(service, "Blender", 8000, "2026-05-30")
 
-    # June and July hold no receipts, but they are still months the user lived
-    # through, so the timeline reports them as spending nothing.
-    assert service.get_monthly_timeline(1) == {
-        "2026-05": 8000,
-        "2026-06": 0,
-        "2026-07": 0,
-        "2026-08": 2499,
-    }
+    assert service.get_daily_spending(1) == {"2026-05-30": 8000, "2026-08-15": 3499}
 
 
-def test_the_timeline_does_not_reach_beyond_the_recorded_months(service):
+def test_daily_spending_leaves_out_a_date_it_cannot_read(service):
+    """A malformed date belongs to no day, and must not break the chart."""
     store_receipt(service, "Mouse", 2499, "2026-08-15")
+    store_receipt(service, "Mystery", 500, "not-a-date")
 
-    # One month of receipts is one month of history: months before the first
-    # receipt are months that were never recorded, not months of no spending.
-    assert service.get_monthly_timeline(1) == {"2026-08": 2499}
-
-
-def test_the_timeline_of_an_empty_account_is_empty(service):
-    assert service.get_monthly_timeline(1) == {}
-
-
-def test_filling_month_gaps_crosses_the_turn_of_the_year():
-    assert fill_month_gaps({"2025-11": 500, "2026-02": 300}) == {
-        "2025-11": 500,
-        "2025-12": 0,
-        "2026-01": 0,
-        "2026-02": 300,
-    }
-
-
-def test_filling_month_gaps_leaves_an_unreadable_key_alone():
-    """A month that cannot be parsed must not turn the loop into a long one."""
-    assert fill_month_gaps({"whenever": 100}) == {"whenever": 100}
+    assert service.get_daily_spending(1) == {"2026-08-15": 2499}
 
 
 def test_upcoming_deadlines_are_within_the_window_and_soonest_first(service):
@@ -139,7 +111,7 @@ def test_every_metric_handles_an_empty_account(service):
     assert service.get_active_and_expired_counts(1) == {"active": 0, "expired": 0}
     assert service.get_category_spending(1) == {}
     assert service.get_monthly_spending(1) == {}
-    assert service.get_monthly_timeline(1) == {}
+    assert service.get_daily_spending(1) == {}
     assert service.get_upcoming_deadlines(1) == []
 
 

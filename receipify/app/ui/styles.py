@@ -317,6 +317,28 @@ def app_stylesheet():
             font-weight: 800;
         }
 
+        QComboBox#chartRangeSelector {
+            background-color: #FFFFFF;
+            border: 1px solid #E2E8F0;
+            border-radius: 9px;
+            color: #1E293B;
+            font-size: 12px;
+            font-weight: 700;
+            min-width: 172px;
+            padding: 5px 10px;
+        }
+
+        QComboBox#chartRangeSelector::drop-down {
+            border: none;
+            width: 22px;
+        }
+
+        QLabel#statisticValue {
+            color: #1E293B;
+            font-size: 20px;
+            font-weight: 800;
+        }
+
         QLabel#panelCaption {
             color: #64748B;
             font-size: 12px;
