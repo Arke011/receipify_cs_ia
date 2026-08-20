@@ -1,108 +1,80 @@
 """The analytics dashboard: headline figures, a spending trend, and deadlines."""
 
-import matplotlib
-
-# The canvas is embedded in a Qt widget, so the Qt backend has to be selected
-# before pyplot-related modules pick an interactive one of their own.
-matplotlib.use("QtAgg")
-
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from matplotlib.figure import Figure
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QRectF, Qt
+from PyQt6.QtGui import QColor, QPainter, QPainterPath
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
     QProgressBar,
+    QPushButton,
     QScrollArea,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from app.services.dashboard_service import DashboardService
+from app.ui.formatting import format_currency
+from app.ui.trend_chart import MonthlyTrendChart, SpendingTrendDialog, format_month_range
 
 
-CURRENCY_PREFIX = "EUR"
-
-CARD_BACKGROUND = "#FFFFFF"
-PAGE_BACKGROUND = "#F4F7FB"
-LINE_COLOUR = "#2563EB"
-GRID_COLOUR = "#E2E8F0"
-AXIS_TEXT_COLOUR = "#64748B"
-
-
-def format_currency(cents):
-    """Money with thousands separators, e.g. 124550 -> 'EUR 1,245.50'."""
-    return f"{CURRENCY_PREFIX} {cents / 100:,.2f}"
+# The bar is drawn in tenths of a percent so that it matches the share printed
+# beside it to one decimal place.
+CATEGORY_BAR_SCALE = 1000
+CATEGORY_BAR_HEIGHT = 12
+CATEGORY_BAR_TRACK_COLOUR = "#F1F5F9"
+CATEGORY_BAR_FILL_COLOUR = "#2563EB"
 
 
-class MonthlyTrendChart(FigureCanvasQTAgg):
-    """A line chart of spending per month, drawn to match the application theme."""
+class CategoryBar(QProgressBar):
+    """A share of the total, drawn with round ends whatever the share is.
 
-    def __init__(self, parent=None):
-        self.figure = Figure(figsize=(5, 3), dpi=100, facecolor=CARD_BACKGROUND)
-        super().__init__(self.figure)
-        self.setParent(parent)
-        self.setMinimumHeight(260)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    Qt's stylesheet painter drops the corner radius as soon as a chunk is
+    narrower than twice that radius, so a category worth a few percent came out
+    as a hard rectangle, and one right on the boundary came out rounded at one
+    end and cut square at the other.
 
-    def plot(self, monthly_spending):
-        self.figure.clear()
-        axes = self.figure.add_subplot(111)
-        axes.set_facecolor(CARD_BACKGROUND)
+    The fill is painted here instead, and always within the track's own outline:
+    it is the shape the two have in common. That is what keeps a share of a
+    fraction of a percent inside the rounded end of the track rather than
+    standing a full-height line up against its curve. The fill is never widened
+    to make it look better, so a small share still reads as a small share.
+    """
 
-        if not monthly_spending:
-            axes.text(
-                0.5,
-                0.5,
-                "No Spending Data Available",
-                horizontalalignment="center",
-                verticalalignment="center",
-                color=AXIS_TEXT_COLOUR,
-                fontsize=11,
-                transform=axes.transAxes,
-            )
-            axes.set_axis_off()
-            self.figure.tight_layout()
-            self.draw_idle()
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        track = QRectF(self.rect())
+        track_radius = track.height() / 2
+        track_path = QPainterPath()
+        track_path.addRoundedRect(track, track_radius, track_radius)
+
+        painter.setBrush(QColor(CATEGORY_BAR_TRACK_COLOUR))
+        painter.drawPath(track_path)
+
+        fill_width = track.width() * self.filled_fraction()
+        if fill_width <= 0:
             return
 
-        months = list(monthly_spending)
-        amounts = [cents / 100 for cents in monthly_spending.values()]
+        fill = QRectF(track.left(), track.top(), fill_width, track.height())
+        # The far end carries as much of the track's curve as it has room for;
+        # the near end is left to the track, which trims it just below.
+        radius = min(track_radius, fill_width / 2)
+        fill_path = QPainterPath()
+        fill_path.addRoundedRect(fill, radius, radius)
 
-        axes.plot(
-            months,
-            amounts,
-            color=LINE_COLOUR,
-            linewidth=2.2,
-            marker="o",
-            markersize=5,
-            markerfacecolor=LINE_COLOUR,
-            markeredgecolor=CARD_BACKGROUND,
-        )
-        axes.fill_between(months, amounts, color=LINE_COLOUR, alpha=0.08)
+        painter.setBrush(QColor(CATEGORY_BAR_FILL_COLOUR))
+        painter.drawPath(fill_path.intersected(track_path))
 
-        axes.set_ylabel(f"Spending ({CURRENCY_PREFIX})", color=AXIS_TEXT_COLOUR, fontsize=9)
-        axes.grid(True, axis="y", color=GRID_COLOUR, linewidth=1)
-        axes.set_axisbelow(True)
-        axes.tick_params(colors=AXIS_TEXT_COLOUR, labelsize=8)
-        for side in ("top", "right"):
-            axes.spines[side].set_visible(False)
-        for side in ("left", "bottom"):
-            axes.spines[side].set_color(GRID_COLOUR)
+    def filled_fraction(self):
+        """How much of the bar is filled, from 0 to 1."""
+        span = self.maximum() - self.minimum()
+        if span <= 0:
+            return 0.0
 
-        # A single month has no line to read, so its marker is given room either side.
-        if len(months) == 1:
-            axes.set_xlim(-0.5, 0.5)
-        axes.set_ylim(bottom=0)
-        if len(months) > 6:
-            for label in axes.get_xticklabels():
-                label.set_rotation(45)
-                label.set_horizontalalignment("right")
-
-        self.figure.tight_layout()
-        self.draw_idle()
+        return (self.value() - self.minimum()) / span
 
 
 class DashboardPage(QWidget):
@@ -111,6 +83,7 @@ class DashboardPage(QWidget):
         self.data_manager = data_manager
         self.user_id = user_id
         self.service = DashboardService(data_manager)
+        self.monthly_timeline = {}
         self.build_ui()
         self.refresh()
 
@@ -178,8 +151,21 @@ class DashboardPage(QWidget):
         split_row = QHBoxLayout()
         split_row.setSpacing(16)
 
-        trend_panel, trend_layout = self.create_panel("Monthly spending trend")
+        self.enlarge_button = QPushButton("Enlarge")
+        self.enlarge_button.setObjectName("panelActionButton")
+        self.enlarge_button.setToolTip("Open the chart in a resizable window")
+        self.enlarge_button.clicked.connect(self.open_trend_dialog)
+
+        # The span the chart covers is stated rather than left to be read off
+        # the axis, which only carries as many labels as it has room for.
+        self.trend_range_label = QLabel()
+        self.trend_range_label.setObjectName("panelCaption")
+
+        trend_panel, trend_layout = self.create_panel(
+            "Monthly spending trend", actions=(self.trend_range_label, self.enlarge_button)
+        )
         self.trend_chart = MonthlyTrendChart()
+        self.trend_chart.enlarge_requested.connect(self.open_trend_dialog)
         trend_layout.addWidget(self.trend_chart)
         split_row.addWidget(trend_panel, stretch=3)
 
@@ -187,6 +173,10 @@ class DashboardPage(QWidget):
         split_row.addWidget(category_panel, stretch=2)
 
         return split_row
+
+    def open_trend_dialog(self):
+        """Show the chart at full size, where a longer history stays readable."""
+        SpendingTrendDialog(self.monthly_timeline, parent=self).exec()
 
     def build_deadlines_section(self):
         panel, panel_layout = self.create_panel("Upcoming deadlines (next 30 days)")
@@ -207,16 +197,23 @@ class DashboardPage(QWidget):
 
         return panel
 
-    def create_panel(self, title_text):
+    def create_panel(self, title_text, actions=()):
         panel = QFrame()
         panel.setObjectName("dashboardPanel")
         panel_layout = QVBoxLayout(panel)
         panel_layout.setContentsMargins(18, 16, 18, 16)
         panel_layout.setSpacing(12)
 
+        header = QHBoxLayout()
+        header.setSpacing(10)
+        panel_layout.addLayout(header)
+
         title = QLabel(title_text)
         title.setObjectName("dashboardPanelTitle")
-        panel_layout.addWidget(title)
+        header.addWidget(title)
+        header.addStretch(1)
+        for action in actions:
+            header.addWidget(action)
 
         item_layout = QVBoxLayout()
         item_layout.setSpacing(10)
@@ -235,7 +232,10 @@ class DashboardPage(QWidget):
         self.active_warranties_value.setText(str(counts["active"]))
         self.expired_records_value.setText(str(counts["expired"]))
 
-        self.trend_chart.plot(self.service.get_monthly_spending(self.user_id))
+        self.monthly_timeline = self.service.get_monthly_timeline(self.user_id)
+        self.trend_chart.plot(self.monthly_timeline)
+        self.trend_range_label.setText(format_month_range(list(self.monthly_timeline)))
+        self.enlarge_button.setEnabled(bool(self.monthly_timeline))
         self.show_category_spending(self.service.get_category_spending(self.user_id))
         self.show_deadlines(self.service.get_upcoming_deadlines(self.user_id))
 
@@ -269,7 +269,7 @@ class DashboardPage(QWidget):
         header.setSpacing(8)
         layout.addLayout(header)
 
-        share = round(cents / total_cents * 100)
+        share = cents / total_cents * 100
 
         name_label = QLabel(category_name)
         name_label.setObjectName("categoryName")
@@ -277,16 +277,16 @@ class DashboardPage(QWidget):
 
         # The share is stated beside the amount rather than printed on the bar,
         # where it would sit half on the fill and half off it and be unreadable.
-        amount_label = QLabel(f"{share}%  ·  {format_currency(cents)}")
+        amount_label = QLabel(f"{share:.1f}%  ·  {format_currency(cents)}")
         amount_label.setObjectName("categoryAmount")
         header.addWidget(amount_label)
 
-        bar = QProgressBar()
+        bar = CategoryBar()
         bar.setObjectName("categoryBar")
-        bar.setRange(0, 100)
-        bar.setValue(share)
+        bar.setRange(0, CATEGORY_BAR_SCALE)
+        bar.setValue(round(share * CATEGORY_BAR_SCALE / 100))
         bar.setTextVisible(False)
-        bar.setFixedHeight(10)
+        bar.setFixedHeight(CATEGORY_BAR_HEIGHT)
         layout.addWidget(bar)
 
         return row

@@ -133,6 +133,48 @@ def test_duplicate_username_is_reported_on_the_form(qapp, data_manager):
     assert "already taken" in dialog.error_label.text()
 
 
+def row_positions(dialog):
+    """Where the rows above the confirm field sit inside the dialog."""
+
+    def top(widget):
+        return widget.mapTo(dialog, widget.rect().topLeft()).y()
+
+    return (
+        dialog.title_label.geometry(),
+        dialog.subtitle_label.geometry(),
+        top(dialog.username_input),
+        top(dialog.password_input),
+    )
+
+
+def test_switching_modes_keeps_the_form_compact(qapp, data_manager):
+    """Showing the confirm field must not stretch the rows above it apart."""
+    data_manager.register_user("alice", "password123")
+    dialog = LoginDialog(data_manager)
+    dialog.show()
+    qapp.processEvents()
+    login_height = dialog.height()
+    login_positions = row_positions(dialog)
+
+    dialog.username_input.setText("alice")
+    dialog.password_input.setText("wrong-password")
+    dialog.submit()
+    dialog.switch_to_register()
+    qapp.processEvents()
+
+    assert row_positions(dialog) == login_positions
+    assert dialog.height() == dialog.sizeHint().height()
+
+    dialog.switch_to_login()
+    qapp.processEvents()
+
+    # Back on the login form the window is the size it started at, with the
+    # confirm field's space given up rather than shared out between the rows.
+    assert dialog.height() == login_height
+    assert row_positions(dialog) == login_positions
+    dialog.close()
+
+
 def test_password_fields_are_masked(qapp, data_manager):
     from PyQt6.QtWidgets import QLineEdit
 

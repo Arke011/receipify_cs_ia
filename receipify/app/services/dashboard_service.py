@@ -140,8 +140,21 @@ class DashboardService:
         )
 
     def get_monthly_spending(self, user_id) -> dict[str, int]:
-        """Spending per purchase month in cents, oldest month first."""
+        """Spending per purchase month in cents, oldest month first.
+
+        Only months that hold receipts appear, so the result is a summary
+        rather than a timeline; see ``get_monthly_timeline`` for the latter.
+        """
         return build_monthly_spending(self._receipts(user_id))
+
+    def get_monthly_timeline(self, user_id) -> dict[str, int]:
+        """The same figures as an unbroken run of months, oldest first.
+
+        A month between two purchases with nothing bought in it is real
+        information, so it is carried as zero rather than left out; without it
+        a chart joins March to June as though they were neighbours.
+        """
+        return fill_month_gaps(self.get_monthly_spending(user_id))
 
     def get_upcoming_deadlines(self, user_id, days=DEFAULT_DEADLINE_DAYS) -> list[ExpiryItem]:
         """Warranty and return periods needing attention, soonest deadline first.
@@ -199,6 +212,41 @@ def build_monthly_spending(receipts) -> dict[str, int]:
         monthly_totals[month] = monthly_totals.get(month, 0) + receipt.price_cents
 
     return dict(sorted(monthly_totals.items()))
+
+
+def fill_month_gaps(monthly_spending) -> dict[str, int]:
+    """Every month from the first recorded one to the last, zero where empty.
+
+    Months outside that span are left alone: a month before the first receipt
+    is one the user was not recording yet, not a month they spent nothing in.
+    """
+    months = [month for month in monthly_spending if _is_month(month)]
+    if not months:
+        return dict(monthly_spending)
+
+    timeline = {}
+    month = min(months)
+    last_month = max(months)
+    while month <= last_month:
+        timeline[month] = monthly_spending.get(month, 0)
+        month = _next_month(month)
+
+    return timeline
+
+
+def _next_month(month):
+    year, month_number = (int(part) for part in month.split("-"))
+    if month_number == 12:
+        return f"{year + 1}-01"
+    return f"{year}-{month_number + 1:02d}"
+
+
+def _is_month(month):
+    try:
+        datetime.strptime(month, "%Y-%m")
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 def _purchase_month(purchase_date):

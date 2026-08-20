@@ -33,6 +33,7 @@ class LoginDialog(QDialog):
         root.setObjectName("dialogRoot")
 
         root_layout = QVBoxLayout(root)
+        self.root_layout = root_layout
         root_layout.setContentsMargins(26, 24, 26, 24)
         root_layout.setSpacing(18)
 
@@ -48,6 +49,7 @@ class LoginDialog(QDialog):
         form_container = QFrame()
         form_container.setObjectName("formContainer")
         form_layout = QVBoxLayout(form_container)
+        self.form_layout = form_layout
         form_layout.setContentsMargins(22, 22, 22, 22)
         form_layout.setSpacing(14)
         root_layout.addWidget(form_container)
@@ -70,6 +72,10 @@ class LoginDialog(QDialog):
         self.error_label.setWordWrap(True)
         self.error_label.hide()
         root_layout.addWidget(self.error_label)
+
+        # Any height the window has beyond what the form needs is parked here, so
+        # that showing or hiding a field cannot stretch the rows above it apart.
+        root_layout.addStretch(1)
 
         button_row = QHBoxLayout()
         button_row.setSpacing(10)
@@ -138,6 +144,21 @@ class LoginDialog(QDialog):
         self.switch_button.setVisible(not self.is_first_run)
         self.switch_button.setText("Log in instead" if self.is_registering else "Create account")
         self.clear_error()
+        self.refit()
+
+    def refit(self):
+        """Resize the window to the height the form currently needs.
+
+        Showing the confirm field or an error makes the dialog taller, and Qt
+        never shrinks a window again by itself. Hiding them again only queues
+        the relayout, so the layouts are refreshed here from the innermost
+        outwards before the window is measured; without that the dialog is both
+        measured and floored by the taller form it has just left.
+        """
+        for layout in (self.form_layout, self.root_layout, self.layout()):
+            layout.invalidate()
+            layout.activate()
+        self.resize(self.width(), self.sizeHint().height())
 
     def switch_to_register(self):
         self.is_registering = True
@@ -201,6 +222,7 @@ class LoginDialog(QDialog):
     def show_error(self, message):
         self.error_label.setText(message)
         self.error_label.show()
+        self.refit()
 
     def clear_error(self):
         self.error_label.clear()

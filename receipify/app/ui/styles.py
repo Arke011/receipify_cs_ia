@@ -159,6 +159,27 @@ def app_stylesheet():
             background-color: #F8FAFC;
         }
 
+        QPushButton#panelActionButton {
+            background-color: #F1F5F9;
+            border: 1px solid #E2E8F0;
+            border-radius: 9px;
+            color: #334155;
+            font-size: 12px;
+            font-weight: 800;
+            min-width: 0;
+            padding: 5px 12px;
+        }
+
+        QPushButton#panelActionButton:hover {
+            background-color: #E0EAFC;
+            border-color: #C7D8F5;
+            color: #1D4ED8;
+        }
+
+        QPushButton#panelActionButton:disabled {
+            color: #94A3B8;
+        }
+
         QPushButton#dangerButton {
             background-color: #FFFFFF;
             border: 1px solid #FECACA;
@@ -224,20 +245,9 @@ def app_stylesheet():
             font-size: 12px;
         }
 
-        QProgressBar#categoryBar {
-            background-color: #F1F5F9;
-            border: none;
-            border-radius: 6px;
-            color: #FFFFFF;
-            font-size: 10px;
-            font-weight: 800;
-            text-align: center;
-        }
-
-        QProgressBar#categoryBar::chunk {
-            background-color: #2563EB;
-            border-radius: 6px;
-        }
+        /* The category bars paint themselves: see CategoryBar, which keeps the
+           round ends that Qt's own chunk rendering drops on a small fill. Their
+           colours live with that class rather than here. */
 
         QLabel#categoryName {
             color: #1E293B;
@@ -305,6 +315,12 @@ def app_stylesheet():
             color: #1E293B;
             font-size: 24px;
             font-weight: 800;
+        }
+
+        QLabel#panelCaption {
+            color: #64748B;
+            font-size: 12px;
+            font-weight: 700;
         }
 
         QLabel#dashboardPanelTitle {
