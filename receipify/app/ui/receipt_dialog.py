@@ -1,6 +1,7 @@
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFontMetrics, QPixmap
 from PyQt6.QtWidgets import (
     QDialog,
@@ -11,7 +12,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 
 from app.services.image_service import copy_receipt_image, resolve_image_path
 from app.services.validation_service import validate_receipt_input
+from app.ui.scan_dialog import ScanDialog
 
 
 class ElidedLabel(QLabel):
@@ -67,6 +68,7 @@ class AddReceiptDialog(QDialog):
         self.image_removed = False
         self.default_warranty_days = default_warranty_days
         self.default_return_days = default_return_days
+        self.scan_directory = None
         self.setWindowTitle("Edit Receipt" if self.is_editing else "New Receipt")
         self.setMinimumWidth(480)
         self.build_ui()
@@ -155,18 +157,29 @@ class AddReceiptDialog(QDialog):
         return selector
 
     def scan_with_ocr(self):
-        """Entry point for reading a receipt's details from a photo.
+        if self.scan_directory is None:
+            self.scan_directory = TemporaryDirectory(prefix="receipify-capture-")
+        path = self.selected_image_path or (resolve_image_path(self.image_path) if self.image_path else None)
+        dialog = ScanDialog(self.scan_directory.name, image_path=path, parent=self)
+        QTimer.singleShot(0, dialog.start)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            existing = resolve_image_path(self.image_path).resolve() if self.image_path else None
+            self.selected_image_path = dialog.image_path if Path(dialog.image_path) != existing else None
+            self.image_removed = False
+            self.update_image_display()
+            for name, value in dialog.values.items():
+                field = getattr(self, name + "_input")
+                if value and not field.text().strip():
+                    field.setText(value)
+        dialog.deleteLater()
 
-        The scanning itself is not built yet, so this explains the state of it
-        rather than pretending to work.
-        """
-        QMessageBox.information(
-            self,
-            "Scan",
-            "Reading receipt details from a photo is not available yet.\n\n"
-            "Attach the receipt image with 'Choose file' and type the details "
-            "in for now.",
-        )
+    def done(self, result):
+        for scan in self.findChildren(QDialog):
+            scan.reject()
+        if self.scan_directory is not None:
+            self.scan_directory.cleanup()
+            self.scan_directory = None
+        super().done(result)
 
     def choose_image(self):
         selected_path, _ = QFileDialog.getOpenFileName(

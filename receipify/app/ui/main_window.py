@@ -75,6 +75,8 @@ class MainWindow(QMainWindow):
         self.receipts_changed.connect(self.export_page.refresh)
 
     def closeEvent(self, event):
+        for dialog in self.findChildren(QDialog):
+            dialog.reject()
         self.closed.emit()
         super().closeEvent(event)
 

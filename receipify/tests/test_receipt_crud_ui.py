@@ -103,21 +103,23 @@ def test_long_file_names_are_elided_rather_than_stretching_the_row(qapp):
     assert label.text().endswith("…")
 
 
-def test_ocr_is_offered_inside_the_add_dialog(monkeypatch, qapp):
+def test_scan_button_opens_capture_without_saving(monkeypatch, qapp):
+    opened = []
+    class CancelledScan(QDialog):
+        def __init__(self, directory, image_path, parent):
+            super().__init__(parent)
+            opened.append(directory)
+        def start(self):
+            pass
+        def exec(self):
+            return QDialog.DialogCode.Rejected
+    monkeypatch.setattr(receipt_dialog, "ScanDialog", CancelledScan)
     dialog = AddReceiptDialog()
-    messages = []
-    monkeypatch.setattr(
-        receipt_dialog.QMessageBox,
-        "information",
-        staticmethod(lambda parent, title, text: messages.append(title)),
-    )
-
     dialog.scan_image_button.click()
-
-    assert messages == ["Scan"]
-    # Nothing is saved by an OCR attempt that is not built yet.
+    assert len(opened) == 1
     assert dialog.cleaned_values == {}
-    assert dialog.result() != QDialog.DialogCode.Accepted
+    assert dialog.selected_image_path is None
+    dialog.reject()
 
 
 def test_receipt_card_actions_call_their_callbacks(qapp):

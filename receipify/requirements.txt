@@ -3,3 +3,6 @@ PyQt6-Qt6==6.11.0
 PyQt6_sip==13.11.1
 matplotlib==3.11.1
 pytest>=8,<9
+Pillow>=11,<13
+qrcode>=8,<9
+pillow-heif>=0.18,<2
