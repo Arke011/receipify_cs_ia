@@ -140,8 +140,6 @@ def row_positions(dialog):
         return widget.mapTo(dialog, widget.rect().topLeft()).y()
 
     return (
-        dialog.title_label.geometry(),
-        dialog.subtitle_label.geometry(),
         top(dialog.username_input),
         top(dialog.password_input),
     )

@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QStackedWidget,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -22,11 +22,10 @@ from app.services.receipt_browsing_service import (
 )
 from app.ui.dashboard_page import DashboardPage
 from app.ui.export_page import ExportPage
-from app.ui.filter_dialog import FilterDialog, filter_icon
+from app.ui.filter_dialog import FilterDialog
 from app.ui.receipt_dialog import AddReceiptDialog
 from app.ui.receipt_card import ReceiptCard
 from app.ui.settings_page import SettingsPage
-from app.ui.styles import app_stylesheet
 from app.ui.receipt_image_viewer import ReceiptImageViewer
 
 
@@ -52,24 +51,12 @@ class MainWindow(QMainWindow):
         self.load_receipts()
 
     def build_ui(self):
-        central_widget = QWidget()
-        central_widget.setObjectName("appRoot")
-        self.setCentralWidget(central_widget)
-
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(44, 36, 44, 36)
-        main_layout.setSpacing(20)
-
-        self.build_navigation(main_layout)
-
-        self.page_stack = QStackedWidget()
-        main_layout.addWidget(self.page_stack, stretch=1)
-
+        self.page_stack = QTabWidget()
+        self.setCentralWidget(self.page_stack)
         self.dashboard_page = DashboardPage(self.data_manager, self.user_id)
         self.export_page = ExportPage(self.data_manager, self.user_id)
         self.settings_page = SettingsPage(
-            self.data_manager,
-            self.user_id,
+            self.data_manager, self.user_id,
             on_settings_saved=self.refresh_settings_dependent_views,
         )
         self.pages = {
@@ -78,37 +65,14 @@ class MainWindow(QMainWindow):
             "Export": self.export_page,
             "Settings": self.settings_page,
         }
-        for page in self.pages.values():
-            self.page_stack.addWidget(page)
-
+        for name, page in self.pages.items():
+            self.page_stack.addTab(page, name)
+        self.page_stack.currentChanged.connect(self.refresh_current_page)
+        self.logout_button = QPushButton("Log out")
+        self.logout_button.clicked.connect(self.logged_out.emit)
+        self.page_stack.setCornerWidget(self.logout_button)
         self.receipts_changed.connect(self.dashboard_page.refresh)
         self.receipts_changed.connect(self.export_page.refresh)
-
-        self.show_page("Receipts")
-        self.setStyleSheet(app_stylesheet())
-
-    def build_navigation(self, main_layout):
-        navigation_layout = QHBoxLayout()
-        navigation_layout.setSpacing(8)
-        main_layout.addLayout(navigation_layout)
-
-        navigation_layout.addStretch(1)
-
-        self.navigation_buttons = {}
-        for page_name in ("Receipts", "Dashboard", "Export", "Settings"):
-            button = QPushButton(page_name)
-            button.setObjectName("navButton")
-            button.setCheckable(True)
-            button.clicked.connect(
-                lambda _checked=False, name=page_name: self.show_page(name)
-            )
-            navigation_layout.addWidget(button)
-            self.navigation_buttons[page_name] = button
-
-        self.logout_button = QPushButton("Log out")
-        self.logout_button.setObjectName("navButton")
-        self.logout_button.clicked.connect(self.logged_out.emit)
-        navigation_layout.addWidget(self.logout_button)
 
     def closeEvent(self, event):
         self.closed.emit()
@@ -117,80 +81,42 @@ class MainWindow(QMainWindow):
     def build_receipts_page(self):
         page = QWidget()
         main_layout = QVBoxLayout(page)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(20)
-
-        header_layout = QHBoxLayout()
-        header_layout.setSpacing(20)
-        main_layout.addLayout(header_layout)
-
-        title_area = QVBoxLayout()
-        title_area.setSpacing(4)
-        header_layout.addLayout(title_area, stretch=1)
-
-        heading = QLabel("My Receipts")
-        heading.setObjectName("pageTitle")
-        title_area.addWidget(heading)
-
-        subtitle = QLabel("Track purchases, warranties, and return periods.")
-        subtitle.setObjectName("pageSubtitle")
-        title_area.addWidget(subtitle)
-
-        add_button = QPushButton("+ Add Receipt")
-        add_button.setObjectName("primaryButton")
-        add_button.setMinimumHeight(46)
-        add_button.clicked.connect(self.open_add_receipt_dialog)
-        header_layout.addWidget(add_button, alignment=Qt.AlignmentFlag.AlignTop)
-
-        search_layout = QHBoxLayout()
-        search_layout.setSpacing(10)
-        main_layout.addLayout(search_layout)
-
+        controls = QHBoxLayout()
         self.search_bar = QLineEdit()
-        self.search_bar.setObjectName("searchBar")
-        self.search_bar.setPlaceholderText("Search by product, store, category, or price...")
-        self.search_bar.setMinimumHeight(48)
+        self.search_bar.setPlaceholderText("Search product, store, category, or price")
+        self.search_bar.setAccessibleName("Search receipts")
         self.search_bar.textChanged.connect(self.filter_receipts)
-        search_layout.addWidget(self.search_bar, stretch=1)
-
-        self.filter_button = QPushButton()
-        self.filter_button.setObjectName("filterButton")
-        self.filter_button.setIcon(filter_icon())
-        self.filter_button.setMinimumHeight(48)
-        self.filter_button.setMinimumWidth(132)
+        controls.addWidget(self.search_bar, stretch=1)
+        self.filter_button = QPushButton("Filters")
         self.filter_button.clicked.connect(self.open_filter_dialog)
-        search_layout.addWidget(self.filter_button)
+        controls.addWidget(self.filter_button)
+        add_button = QPushButton("Add receipt")
+        add_button.clicked.connect(self.open_add_receipt_dialog)
+        controls.addWidget(add_button)
+        main_layout.addLayout(controls)
         self.update_filter_button()
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setObjectName("receiptScrollArea")
         main_layout.addWidget(self.scroll_area, stretch=1)
 
         self.gallery_widget = QWidget()
-        self.gallery_widget.setObjectName("galleryWidget")
         self.gallery_layout = QVBoxLayout(self.gallery_widget)
-        self.gallery_layout.setContentsMargins(2, 4, 10, 4)
-        self.gallery_layout.setSpacing(16)
         self.scroll_area.setWidget(self.gallery_widget)
 
         self.empty_state = QWidget()
         empty_layout = QVBoxLayout(self.empty_state)
-        empty_layout.setContentsMargins(0, 40, 0, 0)
-        empty_layout.setSpacing(14)
 
         self.empty_label = QLabel(
             "No receipts yet. Add your first receipt to begin tracking warranties and returns."
         )
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setObjectName("emptyLabel")
         self.empty_label.setWordWrap(True)
         empty_layout.addWidget(self.empty_label)
 
         # Offered only when something is actually filtered out, so an empty
         # account is not told to clear filters it never set.
         self.clear_filters_button = QPushButton("Clear search and filters")
-        self.clear_filters_button.setObjectName("secondaryButton")
         self.clear_filters_button.clicked.connect(self.clear_all_filters)
         empty_layout.addWidget(
             self.clear_filters_button, alignment=Qt.AlignmentFlag.AlignCenter
@@ -200,14 +126,15 @@ class MainWindow(QMainWindow):
 
     def show_page(self, page_name):
         self.page_stack.setCurrentWidget(self.pages[page_name])
-        if page_name == "Dashboard":
-            self.dashboard_page.refresh()
-        elif page_name == "Settings":
-            self.settings_page.load_settings()
-        elif page_name == "Export":
-            self.export_page.refresh()
-        for name, button in self.navigation_buttons.items():
-            button.setChecked(name == page_name)
+
+    def refresh_current_page(self, _index=None):
+        page = self.page_stack.currentWidget()
+        if page is self.dashboard_page:
+            page.refresh()
+        elif page is self.settings_page:
+            page.load_settings()
+        elif page is self.export_page:
+            page.refresh()
 
     def load_receipts(self):
         self.filter_receipts()
@@ -240,10 +167,6 @@ class MainWindow(QMainWindow):
     def update_filter_button(self):
         count = active_filter_count(self.filters)
         self.filter_button.setText(f"Filters ({count})" if count else "Filters")
-        self.filter_button.setProperty("filtersActive", "yes" if count else "no")
-        # Qt only re-reads a property selector after the widget is repolished.
-        self.filter_button.style().unpolish(self.filter_button)
-        self.filter_button.style().polish(self.filter_button)
 
     def clear_all_filters(self):
         self.filters = default_filters()
@@ -271,6 +194,7 @@ class MainWindow(QMainWindow):
                 )
             self.clear_filters_button.setVisible(is_filtered)
             self.gallery_layout.addWidget(self.empty_state)
+            self.empty_state.show()
             self.gallery_layout.addStretch(1)
             return
 
@@ -294,7 +218,11 @@ class MainWindow(QMainWindow):
             item = self.gallery_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
-                widget.setParent(None)
+                widget.hide()
+                if widget is self.empty_state:
+                    widget.setParent(None)
+                else:
+                    widget.deleteLater()
 
         self.receipt_cards = []
 

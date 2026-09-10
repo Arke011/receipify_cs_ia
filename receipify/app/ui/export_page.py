@@ -4,7 +4,6 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -28,74 +27,40 @@ class ExportPage(QWidget):
 
     def build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(16)
-
-        title = QLabel("Export")
-        title.setObjectName("pageTitle")
-        layout.addWidget(title)
-
-        subtitle = QLabel("Save a copy of your receipt data in a portable format.")
-        subtitle.setObjectName("pageSubtitle")
-        layout.addWidget(subtitle)
-
-        panel = QFrame()
-        panel.setObjectName("exportPanel")
-        panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(22, 20, 22, 20)
-        panel_layout.setSpacing(12)
-        layout.addWidget(panel, stretch=1)
-
-        panel_title = QLabel("Choose receipts to export")
-        panel_title.setObjectName("dashboardPanelTitle")
-        panel_layout.addWidget(panel_title)
-
-        description = QLabel(
-            "Tick the receipts to include, then choose CSV for spreadsheets or "
-            "JSON for structured data."
-        )
-        description.setObjectName("mutedText")
-        description.setWordWrap(True)
-        panel_layout.addWidget(description)
+        layout.addWidget(QLabel("Choose receipts to export:"))
 
         selection_row = QHBoxLayout()
         selection_row.setSpacing(10)
-        panel_layout.addLayout(selection_row)
+        layout.addLayout(selection_row)
 
         self.select_all_button = QPushButton("Select all")
-        self.select_all_button.setObjectName("secondaryButton")
         self.select_all_button.clicked.connect(lambda: self.set_all_checked(True))
         selection_row.addWidget(self.select_all_button)
 
         self.select_none_button = QPushButton("Select none")
-        self.select_none_button.setObjectName("secondaryButton")
         self.select_none_button.clicked.connect(lambda: self.set_all_checked(False))
         selection_row.addWidget(self.select_none_button)
 
         self.selection_label = QLabel()
-        self.selection_label.setObjectName("mutedText")
         selection_row.addWidget(self.selection_label)
         selection_row.addStretch(1)
 
         self.receipt_list = QListWidget()
-        self.receipt_list.setObjectName("exportList")
         self.receipt_list.setSelectionMode(
             QAbstractItemView.SelectionMode.NoSelection
         )
         self.receipt_list.itemChanged.connect(self.update_selection_state)
-        panel_layout.addWidget(self.receipt_list, stretch=1)
+        layout.addWidget(self.receipt_list, stretch=1)
 
         button_layout = QHBoxLayout()
         button_layout.setSpacing(10)
-        panel_layout.addLayout(button_layout)
+        layout.addLayout(button_layout)
 
         self.csv_button = QPushButton("Export CSV")
-        self.csv_button.setObjectName("primaryButton")
         self.csv_button.clicked.connect(lambda: self.export_receipts("csv"))
         button_layout.addWidget(self.csv_button)
 
         self.json_button = QPushButton("Export JSON")
-        self.json_button.setObjectName("secondaryButton")
         self.json_button.clicked.connect(lambda: self.export_receipts("json"))
         button_layout.addWidget(self.json_button)
         button_layout.addStretch(1)

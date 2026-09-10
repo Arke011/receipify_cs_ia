@@ -1,16 +1,13 @@
 from PyQt6.QtWidgets import (
     QDialog,
-    QFrame,
-    QHBoxLayout,
+    QDialogButtonBox,
+    QFormLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
     QVBoxLayout,
-    QWidget,
 )
 
 from app.services.auth_service import validate_credentials
-from app.ui.styles import app_stylesheet
 
 
 class LoginDialog(QDialog):
@@ -23,141 +20,50 @@ class LoginDialog(QDialog):
         self.is_first_run = data_manager.count_claimed_accounts() == 0
         self.is_registering = self.is_first_run
         self.setWindowTitle("Receipify")
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(360)
+        self.resize(400, 200)
         self.build_ui()
         self.apply_mode()
-        self.setStyleSheet(app_stylesheet())
 
     def build_ui(self):
-        root = QWidget()
-        root.setObjectName("dialogRoot")
-
-        root_layout = QVBoxLayout(root)
-        self.root_layout = root_layout
-        root_layout.setContentsMargins(26, 24, 26, 24)
-        root_layout.setSpacing(18)
-
-        self.title_label = QLabel()
-        self.title_label.setObjectName("dialogTitle")
-        root_layout.addWidget(self.title_label)
-
-        self.subtitle_label = QLabel()
-        self.subtitle_label.setObjectName("dialogSubtitle")
-        self.subtitle_label.setWordWrap(True)
-        root_layout.addWidget(self.subtitle_label)
-
-        form_container = QFrame()
-        form_container.setObjectName("formContainer")
-        form_layout = QVBoxLayout(form_container)
-        self.form_layout = form_layout
-        form_layout.setContentsMargins(22, 22, 22, 22)
-        form_layout.setSpacing(14)
-        root_layout.addWidget(form_container)
-
-        self.username_input = self.create_input("e.g. alex")
-        self.password_input = self.create_input("Your password", is_password=True)
-        self.confirm_password_input = self.create_input(
-            "Repeat your password", is_password=True
-        )
-
-        form_layout.addWidget(self.create_field("Username", self.username_input))
-        form_layout.addWidget(self.create_field("Password", self.password_input))
-        self.confirm_field = self.create_field(
-            "Confirm password", self.confirm_password_input
-        )
-        form_layout.addWidget(self.confirm_field)
-
-        self.error_label = QLabel("")
-        self.error_label.setObjectName("errorLabel")
+        layout = QVBoxLayout(self)
+        self.form_layout = QFormLayout()
+        self.username_input = QLineEdit()
+        self.password_input = QLineEdit()
+        self.confirm_password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.confirm_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.form_layout.addRow("Username", self.username_input)
+        self.form_layout.addRow("Password", self.password_input)
+        self.form_layout.addRow("Confirm password", self.confirm_password_input)
+        layout.addLayout(self.form_layout)
+        self.error_label = QLabel()
         self.error_label.setWordWrap(True)
         self.error_label.hide()
-        root_layout.addWidget(self.error_label)
-
-        # Any height the window has beyond what the form needs is parked here, so
-        # that showing or hiding a field cannot stretch the rows above it apart.
-        root_layout.addStretch(1)
-
-        button_row = QHBoxLayout()
-        button_row.setSpacing(10)
-        root_layout.addLayout(button_row)
-
-        self.switch_button = QPushButton()
-        self.switch_button.setObjectName("secondaryButton")
+        layout.addWidget(self.error_label)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        self.switch_button = buttons.addButton("Create account", QDialogButtonBox.ButtonRole.ActionRole)
+        self.switch_button.setAutoDefault(False)
         self.switch_button.clicked.connect(self.toggle_mode)
-        button_row.addWidget(self.switch_button)
-        button_row.addStretch(1)
-
-        self.submit_button = QPushButton()
-        self.submit_button.setObjectName("primaryButton")
+        self.submit_button = buttons.addButton("Log In", QDialogButtonBox.ButtonRole.AcceptRole)
         self.submit_button.setDefault(True)
-        self.submit_button.clicked.connect(self.submit)
-        button_row.addWidget(self.submit_button)
-
-        for field in (self.username_input, self.password_input, self.confirm_password_input):
-            field.returnPressed.connect(self.submit)
-
-        dialog_layout = QVBoxLayout(self)
-        dialog_layout.setContentsMargins(0, 0, 0, 0)
-        dialog_layout.addWidget(root)
-
-    def create_field(self, label_text, input_widget):
-        field = QWidget()
-        layout = QVBoxLayout(field)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-
-        label = QLabel(label_text)
-        label.setObjectName("fieldLabel")
-        layout.addWidget(label)
-        layout.addWidget(input_widget)
-
-        return field
-
-    def create_input(self, placeholder, is_password=False):
-        input_widget = QLineEdit()
-        input_widget.setObjectName("formInput")
-        input_widget.setPlaceholderText(placeholder)
-        input_widget.setMinimumHeight(42)
-        if is_password:
-            input_widget.setEchoMode(QLineEdit.EchoMode.Password)
-        return input_widget
+        buttons.accepted.connect(self.submit)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
 
     def apply_mode(self):
-        if self.is_registering:
-            self.title_label.setText(
-                "Welcome to Receipify" if self.is_first_run else "Create Account"
-            )
-            self.subtitle_label.setText(
-                "Create your account to start tracking receipts. Your existing "
-                "receipts will be kept."
-                if self.is_first_run
-                else "Choose a username and password for the new account."
-            )
-            self.submit_button.setText("Create Account")
-        else:
-            self.title_label.setText("Log In")
-            self.subtitle_label.setText("Enter your credentials to open your receipts.")
-            self.submit_button.setText("Log In")
-
-        self.confirm_field.setVisible(self.is_registering)
-        # On first run there is no other account to switch to.
+        action = "Create Account" if self.is_registering else "Log In"
+        self.setWindowTitle(f"Receipify — {action}")
+        self.submit_button.setText(action)
+        self.form_layout.setRowVisible(self.confirm_password_input, self.is_registering)
         self.switch_button.setVisible(not self.is_first_run)
         self.switch_button.setText("Log in instead" if self.is_registering else "Create account")
         self.clear_error()
         self.refit()
 
     def refit(self):
-        """Resize the window to the height the form currently needs.
-
-        Showing the confirm field or an error makes the dialog taller, and Qt
-        never shrinks a window again by itself. Hiding them again only queues
-        the relayout, so the layouts are refreshed here from the innermost
-        outwards before the window is measured; without that the dialog is both
-        measured and floored by the taller form it has just left.
-        """
-        for layout in (self.form_layout, self.root_layout, self.layout()):
-            layout.invalidate()
-            layout.activate()
+        self.layout().invalidate()
+        self.layout().activate()
         self.resize(self.width(), self.sizeHint().height())
 
     def switch_to_register(self):

@@ -18,7 +18,6 @@ class ReceiptImageViewer(QDialog):
 
         layout = QVBoxLayout(self)
         self.image_label = QLabel()
-        self.image_label.setObjectName("fullReceiptImage")
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setWordWrap(True)
         layout.addWidget(self.image_label, stretch=1)

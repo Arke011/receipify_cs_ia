@@ -40,7 +40,7 @@ app/
   data/          SQLite persistence layer
   models/        Receipt model
   services/      Validation and expiry calculations
-  ui/            PyQt6 windows, dialogs, cards, and styles
+  ui/            PyQt6 windows, dialogs, and receipt entries
 data/            Local runtime database (not committed)
 tests/           Automated tests
 main.py          Application entry point
@@ -48,12 +48,15 @@ main.py          Application entry point
 
 ## Current scope
 
-Receipts, Dashboard, Export, and Settings are all functional. Receipts can be
+The interface uses standard Qt controls and system fonts, with four tabs:
+Receipts, Dashboard, Export, and Settings. Receipt entries retain images,
+warranty/return status icons and text, expiry dates, and Edit/Delete actions.
+Log out is available beside the tabs. Receipts can be
 added, edited, deleted, searched, filtered, and exported as CSV or JSON, and the
 dashboard charts spending and upcoming warranty and return deadlines.
 
 Reading receipt details from a photo is not implemented. The entry point for it
-sits in the Add Receipt dialog as "Scan with OCR", which currently explains that
+sits in the Add Receipt dialog as "Scan", which currently explains that
 the feature is not available yet.
 
 ## Dashboard

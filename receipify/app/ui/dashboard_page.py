@@ -2,11 +2,10 @@
 
 from calendar import month_abbr
 
-from PyQt6.QtCore import QRectF, Qt
-from PyQt6.QtGui import QColor, QPainter, QPainterPath
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QComboBox,
-    QFrame,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QProgressBar,
@@ -16,67 +15,8 @@ from PyQt6.QtWidgets import (
 )
 
 from app.services.dashboard_service import build_dashboard_summary
-from app.ui.formatting import format_currency
+from app.ui.formatting import format_currency, status_icon_label
 from app.ui.trend_chart import SpendingBarChart
-
-
-# The bar is drawn in tenths of a percent so that it matches the share printed
-# beside it to one decimal place.
-CATEGORY_BAR_SCALE = 1000
-CATEGORY_BAR_HEIGHT = 12
-CATEGORY_BAR_TRACK_COLOUR = "#F1F5F9"
-CATEGORY_BAR_FILL_COLOUR = "#2563EB"
-
-
-class CategoryBar(QProgressBar):
-    """A share of the total, drawn with round ends whatever the share is.
-
-    Qt's stylesheet painter drops the corner radius as soon as a chunk is
-    narrower than twice that radius, so a category worth a few percent came out
-    as a hard rectangle, and one right on the boundary came out rounded at one
-    end and cut square at the other.
-
-    The fill is painted here instead, and always within the track's own outline:
-    it is the shape the two have in common. That is what keeps a share of a
-    fraction of a percent inside the rounded end of the track rather than
-    standing a full-height line up against its curve. The fill is never widened
-    to make it look better, so a small share still reads as a small share.
-    """
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-
-        track = QRectF(self.rect())
-        track_radius = track.height() / 2
-        track_path = QPainterPath()
-        track_path.addRoundedRect(track, track_radius, track_radius)
-
-        painter.setBrush(QColor(CATEGORY_BAR_TRACK_COLOUR))
-        painter.drawPath(track_path)
-
-        fill_width = track.width() * self.filled_fraction()
-        if fill_width <= 0:
-            return
-
-        fill = QRectF(track.left(), track.top(), fill_width, track.height())
-        # The far end carries as much of the track's curve as it has room for;
-        # the near end is left to the track, which trims it just below.
-        radius = min(track_radius, fill_width / 2)
-        fill_path = QPainterPath()
-        fill_path.addRoundedRect(fill, radius, radius)
-
-        painter.setBrush(QColor(CATEGORY_BAR_FILL_COLOUR))
-        painter.drawPath(fill_path.intersected(track_path))
-
-    def filled_fraction(self):
-        """How much of the bar is filled, from 0 to 1."""
-        span = self.maximum() - self.minimum()
-        if span <= 0:
-            return 0.0
-
-        return (self.value() - self.minimum()) / span
 
 
 class DashboardPage(QWidget):
@@ -95,24 +35,12 @@ class DashboardPage(QWidget):
 
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setObjectName("dashboardScrollArea")
         root_layout.addWidget(scroll_area)
 
         content = QWidget()
-        content.setObjectName("dashboardContent")
         scroll_area.setWidget(content)
 
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(2, 0, 10, 20)
-        layout.setSpacing(20)
-
-        title = QLabel("Dashboard")
-        title.setObjectName("pageTitle")
-        layout.addWidget(title)
-
-        subtitle = QLabel("A simple overview of your purchases and important dates.")
-        subtitle.setObjectName("pageSubtitle")
-        layout.addWidget(subtitle)
 
         layout.addLayout(self.build_summary_row())
         layout.addLayout(self.build_split_section())
@@ -121,7 +49,6 @@ class DashboardPage(QWidget):
 
     def build_summary_row(self):
         summary_row = QHBoxLayout()
-        summary_row.setSpacing(16)
 
         self.total_spending_value = self.add_stat_card(summary_row, "Total spending")
         self.active_warranties_value = self.add_stat_card(summary_row, "Active warranties")
@@ -130,29 +57,17 @@ class DashboardPage(QWidget):
         return summary_row
 
     def add_stat_card(self, layout, label_text):
-        card = QFrame()
-        card.setObjectName("dashboardSummaryCard")
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(20, 18, 20, 18)
-        card_layout.setSpacing(6)
-
-        label = QLabel(label_text)
-        label.setObjectName("dashboardMetricLabel")
-        card_layout.addWidget(label)
-
+        group = QGroupBox(label_text)
+        group_layout = QVBoxLayout(group)
         value = QLabel("0")
-        value.setObjectName("dashboardMetricValue")
-        card_layout.addWidget(value)
-
-        layout.addWidget(card, stretch=1)
+        group_layout.addWidget(value)
+        layout.addWidget(group, stretch=1)
         return value
 
     def build_split_section(self):
         split_row = QHBoxLayout()
-        split_row.setSpacing(16)
 
         self.year_selector = QComboBox()
-        self.year_selector.setObjectName("chartRangeSelector")
         self.year_selector.setAccessibleName("Chart spending period")
         self.year_selector.setToolTip("All years shows yearly totals; choose a year to see its months.")
         self.year_selector.currentIndexChanged.connect(self.show_spending_chart)
@@ -174,12 +89,10 @@ class DashboardPage(QWidget):
 
         deadline_scroll = QScrollArea()
         deadline_scroll.setWidgetResizable(True)
-        deadline_scroll.setObjectName("deadlineScrollArea")
         deadline_scroll.setMinimumHeight(180)
         panel_layout.addWidget(deadline_scroll)
 
         deadline_content = QWidget()
-        deadline_content.setObjectName("deadlineContent")
         self.deadline_layout = QVBoxLayout(deadline_content)
         # Right margin keeps the status badges clear of the scrollbar.
         self.deadline_layout.setContentsMargins(0, 0, 16, 0)
@@ -189,28 +102,18 @@ class DashboardPage(QWidget):
         return panel
 
     def create_panel(self, title_text, actions=()):
-        panel = QFrame()
-        panel.setObjectName("dashboardPanel")
-        panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(18, 16, 18, 16)
-        panel_layout.setSpacing(12)
-
-        header = QHBoxLayout()
-        header.setSpacing(10)
-        panel_layout.addLayout(header)
-
-        title = QLabel(title_text)
-        title.setObjectName("dashboardPanelTitle")
-        header.addWidget(title)
-        header.addStretch(1)
-        for action in actions:
-            header.addWidget(action)
-
-        item_layout = QVBoxLayout()
-        item_layout.setSpacing(10)
-        panel_layout.addLayout(item_layout)
-
-        return panel, item_layout
+        panel = QGroupBox(title_text)
+        layout = QVBoxLayout(panel)
+        if actions:
+            controls = QHBoxLayout()
+            controls.addWidget(QLabel("Period"))
+            for action in actions:
+                controls.addWidget(action)
+            controls.addStretch()
+            layout.addLayout(controls)
+        items = QVBoxLayout()
+        layout.addLayout(items)
+        return panel, items
 
     # ------------------------------------------------------------------ refresh
 
@@ -282,6 +185,8 @@ class DashboardPage(QWidget):
 
         name_label = QLabel(category_name)
         name_label.setObjectName("categoryName")
+        name_label.setTextFormat(Qt.TextFormat.PlainText)
+        name_label.setWordWrap(True)
         header.addWidget(name_label, stretch=1)
 
         # The share is stated beside the amount rather than printed on the bar,
@@ -290,12 +195,10 @@ class DashboardPage(QWidget):
         amount_label.setObjectName("categoryAmount")
         header.addWidget(amount_label)
 
-        bar = CategoryBar()
-        bar.setObjectName("categoryBar")
-        bar.setRange(0, CATEGORY_BAR_SCALE)
-        bar.setValue(round(share * CATEGORY_BAR_SCALE / 100))
+        bar = QProgressBar()
+        bar.setRange(0, 1000)
+        bar.setValue(round(share * 10))
         bar.setTextVisible(False)
-        bar.setFixedHeight(CATEGORY_BAR_HEIGHT)
         layout.addWidget(bar)
 
         return row
@@ -315,10 +218,9 @@ class DashboardPage(QWidget):
         self.deadline_layout.addStretch(1)
 
     def create_deadline_row(self, item):
-        row = QFrame()
-        row.setObjectName("deadlineRow")
+        row = QWidget()
         layout = QHBoxLayout(row)
-        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setContentsMargins(0, 4, 0, 4)
         layout.setSpacing(12)
 
         details = QVBoxLayout()
@@ -326,17 +228,19 @@ class DashboardPage(QWidget):
         layout.addLayout(details, stretch=1)
 
         product = QLabel(item.receipt.product_name)
-        product.setObjectName("deadlineProduct")
+        product.setTextFormat(Qt.TextFormat.PlainText)
+        product.setWordWrap(True)
         details.addWidget(product)
 
         merchant = QLabel(f"{item.receipt.merchant_name}  ·  {item.period_name}")
-        merchant.setObjectName("deadlineMeta")
+        merchant.setTextFormat(Qt.TextFormat.PlainText)
+        merchant.setWordWrap(True)
         details.addWidget(merchant)
 
         date_label = QLabel(item.expiry_date)
-        date_label.setObjectName("deadlineDate")
         layout.addWidget(date_label)
 
+        layout.addWidget(status_icon_label("red" if item.days_remaining < 0 else "orange"))
         layout.addWidget(self.create_status_badge(item.days_remaining))
 
         return row
@@ -348,7 +252,6 @@ class DashboardPage(QWidget):
         badge.setObjectName("statusBadge")
         badge.setProperty("statusColor", "red" if is_expired else "orange")
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        badge.setMinimumWidth(104)
         return badge
 
     @staticmethod

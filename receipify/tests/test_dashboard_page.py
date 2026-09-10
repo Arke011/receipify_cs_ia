@@ -1,18 +1,9 @@
 from datetime import date, timedelta
 
-import pytest
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QLabel, QProgressBar
 
 from app.data.data_manager import DataManager
-from app.ui.dashboard_page import (
-    CATEGORY_BAR_FILL_COLOUR,
-    CATEGORY_BAR_HEIGHT,
-    CATEGORY_BAR_SCALE,
-    CategoryBar,
-    DashboardPage,
-    format_currency,
-)
+from app.ui.dashboard_page import DashboardPage, format_currency
 from app.ui.main_window import MainWindow
 
 
@@ -115,117 +106,6 @@ def test_category_shares_keep_a_decimal_place(qapp, tmp_path):
 
     bars = page.category_layout.parentWidget().findChildren(QProgressBar)
     assert [bar.value() for bar in bars] == [556, 333, 111]
-
-
-def render_bar(share_percent, width=400):
-    """A category bar drawn to an image, so its shape can be inspected."""
-    from PyQt6.QtGui import QImage
-
-    bar = CategoryBar()
-    bar.setRange(0, CATEGORY_BAR_SCALE)
-    bar.setValue(round(share_percent * CATEGORY_BAR_SCALE / 100))
-    bar.setTextVisible(False)
-    bar.setFixedSize(width, CATEGORY_BAR_HEIGHT)
-
-    image = QImage(bar.size(), QImage.Format.Format_ARGB32)
-    image.fill(Qt.GlobalColor.white)
-    bar.render(image)
-    return image
-
-
-def looks_filled(image, x, y, tolerance=24):
-    """Whether a pixel carries the fill colour, allowing for antialiasing.
-
-    The edges of the fill are blended into whatever sits behind them, and the
-    two ends do not sit on the same backdrop: the left one overlaps the rounded
-    end of the track itself. Comparing exact colours would therefore call two
-    identical shapes different.
-    """
-    from PyQt6.QtGui import QColor
-
-    pixel = image.pixelColor(x, y)
-    fill = QColor(CATEGORY_BAR_FILL_COLOUR)
-
-    return all(
-        abs(getattr(pixel, channel)() - getattr(fill, channel)()) <= tolerance
-        for channel in ("red", "green", "blue")
-    )
-
-
-def end_profile(image, x):
-    """Which pixels down one column of the bar are filled."""
-    return [looks_filled(image, x, y) for y in range(CATEGORY_BAR_HEIGHT)]
-
-
-# A fill at least as wide as the bar is tall carries a full round end of its
-# own; a narrower one is cut back by the round end of the track instead.
-FULL_END_SHARE = 100 * CATEGORY_BAR_HEIGHT / 400
-
-
-@pytest.mark.parametrize("share_percent", [3, 4, 4.5, 8, 40, 100])
-def test_category_bars_keep_both_ends_round_at_any_share(qapp, share_percent):
-    """Qt drew a small fill as a rectangle, or rounded one end and squared the other."""
-    assert share_percent >= FULL_END_SHARE
-    image = render_bar(share_percent)
-    fill_width = round(400 * share_percent / 100)
-
-    left = end_profile(image, 0)
-    right = end_profile(image, fill_width - 1)
-
-    # The two ends of the fill are cut to the same shape as each other...
-    assert left == right
-    # ... and that shape is a round one: the corners are cut away, the middle
-    # of the column is not.
-    assert left[0] is False
-    assert left[-1] is False
-    assert left[CATEGORY_BAR_HEIGHT // 2] is True
-
-
-@pytest.mark.parametrize("share_percent", [0.05, 0.1, 0.3, 0.8, 1, 2, 3, 25, 100])
-def test_a_fill_never_reaches_outside_the_track(qapp, share_percent):
-    """A tiny share used to stand a full-height line against the track's curve.
-
-    The track narrows to nothing at its rounded end, so a fill drawn to the
-    full height of the bar hung outside the shape it was supposed to be sitting
-    in. Every pixel the fill covers now has to be one the full bar covers too.
-    """
-    image = render_bar(share_percent)
-    track = render_bar(100)
-
-    outside = [
-        (x, y)
-        for x in range(400)
-        for y in range(CATEGORY_BAR_HEIGHT)
-        if looks_filled(image, x, y) and not looks_filled(track, x, y)
-    ]
-
-    assert outside == []
-
-
-def test_a_category_bar_fills_only_as_far_as_its_share(qapp):
-    image = render_bar(25)
-    middle = CATEGORY_BAR_HEIGHT // 2
-
-    assert looks_filled(image, 98, middle)
-    # The fill stops at a quarter of the bar rather than being widened to look
-    # better, so a small share still reads as a small share.
-    assert not looks_filled(image, 104, middle)
-
-
-def test_a_category_bar_with_nothing_in_it_draws_no_fill(qapp):
-    image = render_bar(0)
-
-    assert not any(
-        looks_filled(image, x, CATEGORY_BAR_HEIGHT // 2) for x in range(400)
-    )
-
-
-def test_a_bar_with_no_range_is_treated_as_empty(qapp):
-    """A category total of zero would otherwise divide by zero mid-paint."""
-    bar = CategoryBar()
-    bar.setRange(0, 0)
-
-    assert bar.filled_fraction() == 0.0
 
 
 def test_deadline_rows_are_badged_by_status(qapp, tmp_path):
