@@ -15,9 +15,6 @@ from app.services.settings_service import DEFAULT_SETTINGS, validate_settings
 
 
 LIKE_ESCAPE_CHARACTER = "\\"
-
-# A second instance, or an open database browser, can hold a write lock briefly.
-# Waiting is better than failing the user's action immediately.
 CONNECTION_TIMEOUT_SECONDS = 10.0
 BUSY_TIMEOUT_MILLISECONDS = 10000
 
