@@ -21,12 +21,6 @@ def app_stylesheet():
             letter-spacing: 0px;
         }
 
-        QLabel#appBrand {
-            color: #1E293B;
-            font-size: 20px;
-            font-weight: 800;
-        }
-
         QLabel#pageSubtitle,
         QLabel#dialogSubtitle,
         QLabel#cardMeta,

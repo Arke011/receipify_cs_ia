@@ -215,7 +215,7 @@ class AddReceiptDialog(QDialog):
         self.image_hint_label.setObjectName("imageHint")
         text_column.addWidget(self.image_hint_label)
 
-        self.scan_image_button = QPushButton("Scan with OCR")
+        self.scan_image_button = QPushButton("Scan")
         self.scan_image_button.setObjectName("secondaryButton")
         self.scan_image_button.clicked.connect(self.scan_with_ocr)
         layout.addWidget(self.scan_image_button)
@@ -239,7 +239,7 @@ class AddReceiptDialog(QDialog):
         """
         QMessageBox.information(
             self,
-            "Scan with OCR",
+            "Scan",
             "Reading receipt details from a photo is not available yet.\n\n"
             "Attach the receipt image with 'Choose file' and type the details "
             "in for now.",

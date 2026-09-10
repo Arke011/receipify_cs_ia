@@ -114,7 +114,7 @@ def test_ocr_is_offered_inside_the_add_dialog(monkeypatch, qapp):
 
     dialog.scan_image_button.click()
 
-    assert messages == ["Scan with OCR"]
+    assert messages == ["Scan"]
     # Nothing is saved by an OCR attempt that is not built yet.
     assert dialog.cleaned_values == {}
     assert dialog.result() != QDialog.DialogCode.Accepted

@@ -92,9 +92,6 @@ class MainWindow(QMainWindow):
         navigation_layout.setSpacing(8)
         main_layout.addLayout(navigation_layout)
 
-        brand = QLabel("Receipify")
-        brand.setObjectName("appBrand")
-        navigation_layout.addWidget(brand)
         navigation_layout.addStretch(1)
 
         self.navigation_buttons = {}
