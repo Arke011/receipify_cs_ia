@@ -21,7 +21,8 @@ On Windows, activate the environment with `.venv\\Scripts\\activate`.
 python main.py
 ```
 
-The app creates its local SQLite database at `data/receipify.db` when needed.
+The app stores its SQLite database and receipt images in the platform’s per-user
+Receipify application-data directory.
 
 ## Run tests
 
@@ -54,3 +55,12 @@ dashboard charts spending and upcoming warranty and return deadlines.
 Reading receipt details from a photo is not implemented. The entry point for it
 sits in the Add Receipt dialog as "Scan with OCR", which currently explains that
 the feature is not available yet.
+
+## Dashboard
+
+The dashboard retains all-time spending, warranty counts, category spending
+with percentages, and deadline review (expired and within the next 30 days).
+The chart's selector offers **All years** for yearly totals, or a specific year
+for its twelve monthly totals. Hover for an exact amount. Changing the chart
+period does not filter the other dashboard sections. There are no zoom controls,
+receipt drill-downs, or separate chart/statistics windows.

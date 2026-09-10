@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 
 from app.models.receipt import Receipt
@@ -51,12 +53,12 @@ def test_out_of_range_period_days_render_as_untracked(period_days):
 
 def test_dashboard_survives_receipts_with_unusable_dates():
     receipts = [
-        make_receipt(receipt_id=1, warranty_days=99999999),
+        make_receipt(receipt_id=1, warranty_days=99999999, return_days=0),
         make_receipt(receipt_id=2, purchase_date="15/08/2026"),
-        make_receipt(receipt_id=3, product_name="Valid", warranty_days=10),
+        make_receipt(receipt_id=3, product_name="Valid", warranty_days=10, return_days=0),
     ]
 
-    summary = build_dashboard_summary(receipts)
+    summary = build_dashboard_summary(receipts, today=date(2026, 8, 15))
 
-    assert summary.total_receipt_count == 3
-    assert [item.receipt.product_name for item in summary.expiring_soon] == ["Valid"]
+    assert summary.total_spending_cents == 7497
+    assert [item.receipt.product_name for item in summary.deadlines] == ["Valid"]

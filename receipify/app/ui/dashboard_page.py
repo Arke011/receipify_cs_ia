@@ -1,29 +1,23 @@
 """The analytics dashboard: headline figures, a spending trend, and deadlines."""
 
+from calendar import month_abbr
+
 from PyQt6.QtCore import QRectF, Qt
 from PyQt6.QtGui import QColor, QPainter, QPainterPath
 from PyQt6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QProgressBar,
-    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
-from app.services.dashboard_service import DashboardService
+from app.services.dashboard_service import build_dashboard_summary
 from app.ui.formatting import format_currency
-from app.ui.trend_chart import (
-    YEAR,
-    SpendingBarChart,
-    SpendingTrendDialog,
-    bar_labels,
-    recorded_span,
-    to_dates,
-    yearly_totals,
-)
+from app.ui.trend_chart import SpendingBarChart
 
 
 # The bar is drawn in tenths of a percent so that it matches the share printed
@@ -90,10 +84,6 @@ class DashboardPage(QWidget):
         super().__init__(parent)
         self.data_manager = data_manager
         self.user_id = user_id
-        self.service = DashboardService(data_manager)
-        self.daily_spending = {}
-        self.receipts_by_day = {}
-        self.yearly_totals = {}
         self.build_ui()
         self.refresh()
 
@@ -161,21 +151,16 @@ class DashboardPage(QWidget):
         split_row = QHBoxLayout()
         split_row.setSpacing(16)
 
-        self.enlarge_button = QPushButton("Enlarge")
-        self.enlarge_button.setObjectName("panelActionButton")
-        self.enlarge_button.setToolTip("Open the chart in a window you can look through")
-        self.enlarge_button.clicked.connect(self.open_trend_dialog)
-
-        # The span the chart covers is stated rather than left to be read off
-        # the axis, which only carries as many labels as it has room for.
-        self.trend_range_label = QLabel()
-        self.trend_range_label.setObjectName("panelCaption")
+        self.year_selector = QComboBox()
+        self.year_selector.setObjectName("chartRangeSelector")
+        self.year_selector.setAccessibleName("Chart spending period")
+        self.year_selector.setToolTip("All years shows yearly totals; choose a year to see its months.")
+        self.year_selector.currentIndexChanged.connect(self.show_spending_chart)
 
         trend_panel, trend_layout = self.create_panel(
-            "Spending over time", actions=(self.trend_range_label, self.enlarge_button)
+            "Spending over time", actions=(self.year_selector,)
         )
         self.trend_chart = SpendingBarChart()
-        self.trend_chart.enlarge_requested.connect(self.open_trend_dialog)
         trend_layout.addWidget(self.trend_chart)
         split_row.addWidget(trend_panel, stretch=3)
 
@@ -183,12 +168,6 @@ class DashboardPage(QWidget):
         split_row.addWidget(category_panel, stretch=2)
 
         return split_row
-
-    def open_trend_dialog(self):
-        """Show the chart at full size, where it can be zoomed into."""
-        SpendingTrendDialog(
-            self.daily_spending, receipts_by_day=self.receipts_by_day, parent=self
-        ).exec()
 
     def build_deadlines_section(self):
         panel, panel_layout = self.create_panel("Upcoming deadlines (next 30 days)")
@@ -236,33 +215,38 @@ class DashboardPage(QWidget):
     # ------------------------------------------------------------------ refresh
 
     def refresh(self):
-        """Reload every figure. Called whenever the receipts behind them change."""
-        counts = self.service.get_active_and_expired_counts(self.user_id)
-        self.total_spending_value.setText(
-            format_currency(self.service.get_total_spending(self.user_id))
-        )
-        self.active_warranties_value.setText(str(counts["active"]))
-        self.expired_records_value.setText(str(counts["expired"]))
+        """Read receipts once; keep chart selection separate from the overview."""
+        self.summary = build_dashboard_summary(self.data_manager.get_all_receipts(self.user_id))
+        self.total_spending_value.setText(format_currency(self.summary.total_spending_cents))
+        self.active_warranties_value.setText(str(self.summary.active_warranties))
+        self.expired_records_value.setText(str(self.summary.expired_warranties))
+        self.show_category_spending(self.summary.category_spending)
+        self.show_deadlines(self.summary.deadlines)
 
-        self.daily_spending = self.service.get_daily_spending(self.user_id)
-        self.receipts_by_day = self.service.get_receipts_by_day(self.user_id)
-        self.show_yearly_bars()
-        self.enlarge_button.setEnabled(bool(self.daily_spending))
-        self.show_category_spending(self.service.get_category_spending(self.user_id))
-        self.show_deadlines(self.service.get_upcoming_deadlines(self.user_id))
+        selected_year = self.year_selector.currentData()
+        self.year_selector.blockSignals(True)
+        self.year_selector.clear()
+        self.year_selector.addItem("All years", None)
+        for year in reversed(self.summary.monthly_spending):
+            self.year_selector.addItem(str(year), year)
+        index = self.year_selector.findData(selected_year)
+        self.year_selector.setCurrentIndex(max(index, 0))
+        self.year_selector.blockSignals(False)
+        self.show_spending_chart()
 
-    def show_yearly_bars(self):
-        """A bar for each recorded year.
-
-        The panel is a summary; the enlarged window is where a year is opened
-        up into its months and days.
-        """
-        spending = to_dates(self.daily_spending)
-        self.yearly_totals = yearly_totals(spending)
-        self.trend_chart.show_totals(
-            self.yearly_totals, bar_labels(list(self.yearly_totals), YEAR)
-        )
-        self.trend_range_label.setText(recorded_span(spending))
+    def show_spending_chart(self, _index=None):
+        year = self.year_selector.currentData()
+        if year is None:
+            totals = self.summary.monthly_spending
+            years = list(range(min(totals), max(totals) + 1)) if totals else []
+            self.trend_chart.show_totals(
+                [str(year) for year in years],
+                [sum(totals.get(year, [])) for year in years],
+            )
+        else:
+            self.trend_chart.show_totals(
+                list(month_abbr)[1:], self.summary.monthly_spending[year]
+            )
 
     def show_category_spending(self, category_spending):
         self.clear_layout(self.category_layout)
@@ -381,4 +365,5 @@ class DashboardPage(QWidget):
             item = layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                widget.hide()
                 widget.deleteLater()

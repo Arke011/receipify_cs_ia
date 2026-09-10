@@ -14,7 +14,6 @@ from app.ui.dashboard_page import (
     format_currency,
 )
 from app.ui.main_window import MainWindow
-from app.ui.trend_chart import SpendingTrendDialog
 
 
 def build_page(tmp_path, receipts=()):
@@ -267,106 +266,85 @@ def test_an_empty_account_shows_placeholders_instead_of_broken_charts(qapp, tmp_
     assert "No Spending Data Available" in placeholders
     assert "Nothing is expiring in the next 30 days." in placeholders
 
-    # The chart still draws: it carries the same message rather than empty axes.
+    # Empty accounts retain a useful chart placeholder.
     chart_texts = [text.get_text() for text in page.trend_chart.figure.axes[0].texts]
     assert chart_texts == ["No Spending Data Available"]
 
 
-def test_the_panel_totals_the_record_a_year_to_a_bar(qapp, tmp_path):
-    from datetime import date
+def test_chart_selector_changes_only_chart_and_does_not_reload_receipts(qapp, tmp_path, monkeypatch):
+    from unittest.mock import Mock
 
-    page = build_page(
-        tmp_path,
-        [
-            receipt_values("Mouse", 2499, "2026-08-15"),
-            receipt_values("Cable", 1000, "2026-08-02"),
-            receipt_values("Blender", 8000, "2026-06-30"),
-            receipt_values("Kettle", 4000, "2024-03-30"),
-        ],
-    )
-
-    heights = dict(
-        zip(
-            page.trend_chart.slots,
-            [patch.get_height() for patch in page.trend_chart.figure.axes[0].patches],
-        )
-    )
-
-    # A year to a bar, with 2025 keeping its place between the two years that
-    # hold receipts.
-    assert heights == {
-        date(2024, 1, 1): 40.0,
-        date(2025, 1, 1): 0.0,
-        date(2026, 1, 1): 114.99,
-    }
+    page = build_page(tmp_path, [
+        receipt_values("Mouse", 1234, "2026-01-15"),
+        receipt_values("Cable", 200, "2026-12-31"),
+        receipt_values("Blender", 5000, "2024-06-15", category_name="Kitchen"),
+    ])
+    manager = page.data_manager
+    read = Mock(wraps=manager.get_all_receipts)
+    monkeypatch.setattr(manager, "get_all_receipts", read)
+    page.refresh()
+    assert read.call_count == 1
+    assert page.trend_chart.labels == ["2024", "2025", "2026"]
+    assert page.trend_chart.cents == [5000, 0, 1434]
+    assert page.total_spending_value.text() == "EUR 64.34"
+    before = category_amounts(page)
+    page.year_selector.setCurrentIndex(page.year_selector.findData(2026))
+    assert page.trend_chart.cents == [1234] + [0] * 10 + [200]
+    assert page.trend_chart.labels == ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    assert read.call_count == 1
+    assert page.total_spending_value.text() == "EUR 64.34"
+    assert category_amounts(page) == before
+    page.year_selector.setCurrentIndex(0)
+    assert page.trend_chart.cents == [5000, 0, 1434]
 
 
-def test_the_chart_panel_states_the_span_it_covers(qapp, tmp_path):
-    page = build_page(
-        tmp_path,
-        [
-            receipt_values("Blender", 8000, "2026-06-30"),
-            receipt_values("Mouse", 2499, "2026-08-15"),
-        ],
-    )
-
-    # The caption names the months the receipts themselves run between.
-    assert page.trend_range_label.text() == "Jun 2026 - Aug 2026"
-    assert page.enlarge_button.isEnabled()
-
-
-def test_the_panel_bars_are_labelled_by_year(qapp, tmp_path):
-    page = build_page(
-        tmp_path,
-        [
-            receipt_values("Kettle", 4000, "2025-03-30"),
-            receipt_values("Mouse", 2499, "2026-08-15"),
-        ],
-    )
-
-    labels = [
-        label.get_text() for label in page.trend_chart.figure.axes[0].get_xticklabels()
-    ]
-
-    assert labels == ["2025", "2026"]
-
-
-def test_the_enlarge_button_is_dead_until_there_is_something_to_show(qapp, tmp_path):
-    page = build_page(tmp_path)
-
-    assert page.enlarge_button.isEnabled() is False
-
-
-def test_enlarging_opens_the_chart_over_the_same_spending(qapp, tmp_path, monkeypatch):
-    page = build_page(
-        tmp_path,
-        [
-            receipt_values("Blender", 8000, "2026-06-30"),
-            receipt_values("Mouse", 2499, "2026-08-15"),
-        ],
-    )
-    opened = []
-    # exec() would block on a modal window, so the dialog is only built.
-    monkeypatch.setattr(SpendingTrendDialog, "exec", lambda dialog: opened.append(dialog))
-
-    page.enlarge_button.click()
-
-    assert len(opened) == 1
-    # The enlarged window is handed the daily figures, which is what lets it
-    # sharpen from months to days as it is zoomed in.
-    assert opened[0].daily_spending == {"2026-06-30": 8000, "2026-08-15": 2499}
-    assert opened[0].chart.interactive is True
-
-
-def test_the_dashboard_updates_when_receipts_change(monkeypatch, qapp, tmp_path):
-    data_manager = DataManager(tmp_path / "receipify-test.db")
-    window = MainWindow(data_manager=data_manager, user_id=1)
-
-    assert window.dashboard_page.total_spending_value.text() == "EUR 0.00"
-
-    data_manager.add_receipt(user_id=1, **receipt_values("Mouse", 2499, "2026-08-15"))
+def test_chart_selection_survives_crud_and_missing_year_returns_to_all(qapp, tmp_path):
+    manager = DataManager(tmp_path / "test.db")
+    values = receipt_values("Mouse", 1000, "2026-01-01")
+    receipt_id = manager.add_receipt(**values)
+    window = MainWindow(data_manager=manager, user_id=1)
+    page = window.dashboard_page
+    page.year_selector.setCurrentIndex(page.year_selector.findData(2026))
+    another_id = manager.add_receipt(**receipt_values("Cable", 500, "2026-01-02"))
     window.receipts_changed.emit()
-
-    assert window.dashboard_page.total_spending_value.text() == "EUR 24.99"
-    assert window.export_page.receipt_list.count() == 1
+    assert page.trend_chart.cents[0] == 1500
+    assert page.year_selector.currentData() == 2026
+    manager.update_receipt(receipt_id, "Mouse", "Tech Store", "Electronics", 2000, "2026-02-01", 0, 0)
+    window.receipts_changed.emit()
+    assert page.trend_chart.cents[:2] == [500, 2000]
+    assert page.total_spending_value.text() == "EUR 25.00"
+    manager.delete_receipt(receipt_id)
+    manager.delete_receipt(another_id)
+    window.receipts_changed.emit()
+    assert page.year_selector.currentData() is None
+    assert page.trend_chart.cents == []
+    assert window.export_page.receipt_list.count() == 0
     window.close()
+
+
+def test_chart_and_category_data_are_scoped_to_signed_in_user(qapp, tmp_path):
+    manager = DataManager(tmp_path / "test.db")
+    other = manager.create_user("other", "password123")
+    manager.add_receipt(user_id=other, **receipt_values("Private", 5000, "2020-01-01"))
+    page = DashboardPage(manager, 1)
+    assert page.total_spending_value.text() == "EUR 0.00"
+    assert page.year_selector.count() == 1
+    assert category_amounts(page) == []
+
+
+def test_refresh_hides_old_category_and_deadline_rows_before_deferred_deletion(qapp, tmp_path):
+    today = date.today()
+    page = build_page(tmp_path, [receipt_values(
+        "Mouse", 1000, (today - timedelta(days=5)).isoformat(), return_days=10,
+    )])
+    page.show()
+    qapp.processEvents()
+    old_category = page.category_layout.itemAt(0).widget()
+    old_deadline = page.deadline_layout.itemAt(0).widget()
+    page.refresh()
+    # The event loop has not deleted these yet: they must not remain painted.
+    assert old_category.isHidden()
+    assert old_deadline.isHidden()
+    qapp.processEvents()
+    assert not page.category_layout.itemAt(0).widget().isHidden()
+    page.close()
