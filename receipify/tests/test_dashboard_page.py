@@ -108,7 +108,7 @@ def test_category_shares_keep_a_decimal_place(qapp, tmp_path):
     assert [bar.value() for bar in bars] == [556, 333, 111]
 
 
-def test_deadline_rows_are_badged_by_status(qapp, tmp_path):
+def test_deadline_rows_are_badged_and_exclude_expired_items(qapp, tmp_path):
     today = date.today()
     page = build_page(
         tmp_path,
@@ -128,8 +128,8 @@ def test_deadline_rows_are_badged_by_status(qapp, tmp_path):
         if label.objectName() == "statusBadge"
     ]
 
-    assert [badge.text() for badge in badges] == ["Expired", "Expiring soon"]
-    assert [badge.property("statusColor") for badge in badges] == ["red", "orange"]
+    assert [badge.text() for badge in badges] == ["Expiring soon"]
+    assert [badge.property("statusColor") for badge in badges] == ["orange"]
 
 
 def test_an_empty_account_shows_placeholders_instead_of_broken_charts(qapp, tmp_path):

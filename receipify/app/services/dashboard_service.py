@@ -50,8 +50,8 @@ def build_dashboard_summary(receipts, today=None):
             if period == "Warranty":
                 active += remaining >= 0
                 expired += remaining < 0
-            # Preserve the existing review of expired and approaching deadlines.
-            if remaining <= 30:
+            # Only deadlines still ahead (including today) within the next 30 days.
+            if 0 <= remaining <= 30:
                 deadlines.append(ExpiryItem(receipt, period, expiry, remaining))
 
     return DashboardSummary(

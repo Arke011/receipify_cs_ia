@@ -8,7 +8,7 @@ from queue import Empty
 
 import pytest
 from PIL import Image
-from PyQt6.QtWidgets import QDialog
+from PyQt6.QtWidgets import QDialog, QLabel
 
 from app.services.mobile_capture_service import MobileCaptureSession
 from app.ui import scan_dialog
@@ -117,7 +117,7 @@ def test_qr_dialog_receives_photo_and_closes_server(qapp, monkeypatch, tmp_path)
     dialog.start_phone()
     session = dialog.session
     assert not dialog.qr_label.pixmap().isNull()
-    assert dialog.link_label.text() == session.url
+    assert all("127.0.0.1" not in label.text() for label in dialog.findChildren(QLabel))
     received = []
     monkeypatch.setattr(dialog, "start_ocr", received.append)
     assert upload(session)[0] == 200

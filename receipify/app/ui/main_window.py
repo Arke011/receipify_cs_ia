@@ -52,7 +52,6 @@ class MainWindow(QMainWindow):
 
     def build_ui(self):
         self.page_stack = QTabWidget()
-        self.setCentralWidget(self.page_stack)
         self.dashboard_page = DashboardPage(self.data_manager, self.user_id)
         self.export_page = ExportPage(self.data_manager, self.user_id)
         self.settings_page = SettingsPage(
@@ -70,7 +69,19 @@ class MainWindow(QMainWindow):
         self.page_stack.currentChanged.connect(self.refresh_current_page)
         self.logout_button = QPushButton("Log out")
         self.logout_button.clicked.connect(self.logged_out.emit)
-        self.page_stack.setCornerWidget(self.logout_button)
+        # A row of its own above the tabs: the tab bar's corner is too shallow,
+        # so a corner button clipped the window edge and the page frame.
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 6, 8, 6)
+        header.addStretch()
+        header.addWidget(self.logout_button)
+        central = QWidget()
+        central_layout = QVBoxLayout(central)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
+        central_layout.addLayout(header)
+        central_layout.addWidget(self.page_stack)
+        self.setCentralWidget(central)
         self.receipts_changed.connect(self.dashboard_page.refresh)
         self.receipts_changed.connect(self.export_page.refresh)
 

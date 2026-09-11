@@ -72,39 +72,30 @@ class ScanDialog(QDialog):
         self.resize(520, 400)
         layout = QVBoxLayout(self)
         sources = QHBoxLayout()
-        self.phone_button = QPushButton("Use phone")
-        self.phone_button.clicked.connect(self.start_phone)
+        self.regenerate_button = QPushButton("Regenerate QR code")
+        self.regenerate_button.clicked.connect(self.start_phone)
         self.file_button = QPushButton("Choose image")
         self.file_button.clicked.connect(self.choose_image)
         self.attached_button = QPushButton("Scan attached image")
         self.attached_button.setEnabled(bool(image_path))
         self.attached_button.clicked.connect(lambda: self.start_ocr(self.image_path))
-        for button in (self.phone_button, self.file_button, self.attached_button):
+        for button in (self.regenerate_button, self.file_button, self.attached_button):
             button.setAutoDefault(False)
             sources.addWidget(button)
         layout.addLayout(sources)
-        self.phone_group = QGroupBox("Capture with your phone")
+        self.phone_group = QGroupBox()
         phone_layout = QVBoxLayout(self.phone_group)
-        self.addresses = QComboBox()
-        self.addresses.setAccessibleName("Computer network address")
-        for label, address in local_addresses():
-            self.addresses.addItem(label, address)
-        self.addresses.currentIndexChanged.connect(self.start_phone)
-        phone_layout.addWidget(self.addresses)
-        self.qr_label = QLabel()
-        self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        phone_layout.addWidget(self.qr_label)
-        self.link_label = QLabel()
-        self.link_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.link_label.setWordWrap(True)
-        self.link_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        phone_layout.addWidget(self.link_label)
-        help_label = QLabel("Scan this QR with your phone's camera. Use the same trusted Wi-Fi. "
-                            "This local transfer is unencrypted. If it will not connect, check Windows Firewall "
-                            "and avoid guest Wi-Fi, or choose an image instead.")
+        help_label = QLabel("Please scan this QR code. Make sure to use the same trusted Wi-Fi on both "
+                            "of your devices. The local transfer is unencrypted.")
         help_label.setWordWrap(True)
         phone_layout.addWidget(help_label)
+        # Centred between the instructions and the timer, with room either side.
+        self.qr_label = QLabel()
+        self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.qr_label.setContentsMargins(0, 8, 0, 8)
+        phone_layout.addWidget(self.qr_label)
         self.expiry_label = QLabel()
+        self.expiry_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         phone_layout.addWidget(self.expiry_label)
         layout.addWidget(self.phone_group)
         self.phone_group.hide()
@@ -138,8 +129,7 @@ class ScanDialog(QDialog):
         form.addRow("Recognized text", self.raw_text)
         layout.addWidget(self.review_group)
         self.review_group.hide()
-        note = QLabel("You can correct the details in the receipt form. Existing typed values are kept. "
-                      "Category and warranty/return defaults are unchanged.")
+        note = QLabel("You can correct the details after scanning")
         note.setWordWrap(True)
         layout.addWidget(note)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
@@ -165,20 +155,20 @@ class ScanDialog(QDialog):
             self.session.stop()
             self.session = None
 
-    def start_phone(self, _index=None):
+    def start_phone(self, _checked=None):
         self.stop_session()
         self.cancel_job()
         self.review_group.hide()
         self.phone_group.show()
         self.qr_label.clear()
-        self.link_label.clear()
         self.expiry_label.clear()
         self.use_button.setEnabled(False)
-        if self.addresses.currentData() is None:
+        addresses = local_addresses()
+        if not addresses:
             self.status.setText("No local Wi-Fi/Ethernet address was found. Connect to a network, reopen Scan, or choose an image.")
             return
         try:
-            self.session = MobileCaptureSession(self.addresses.currentData(), self.directory)
+            self.session = MobileCaptureSession(addresses[0][1], self.directory)
             self.destroyed.connect(self.session.stop)
             buffer = io.BytesIO()
             qr = qrcode.QRCode(box_size=4, border=4)
@@ -188,7 +178,6 @@ class ScanDialog(QDialog):
             pixmap = QPixmap()
             pixmap.loadFromData(buffer.getvalue())
             self.qr_label.setPixmap(pixmap)
-            self.link_label.setText(self.session.url)
             self.status.setText("Waiting for a photo…")
             self.timer.start()
         except OSError as error:
@@ -205,8 +194,7 @@ class ScanDialog(QDialog):
             if self.session.expired:
                 self.stop_session()
                 self.qr_label.clear()
-                self.link_label.clear()
-                self.status.setText("Connection expired. Press Use phone to generate a new QR code.")
+                self.status.setText("Connection expired. Press Regenerate QR code to get a new one.")
                 self.expiry_label.clear()
             else:
                 seconds = max(0, int(self.session.deadline - time.monotonic()))

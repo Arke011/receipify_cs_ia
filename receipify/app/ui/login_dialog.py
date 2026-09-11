@@ -41,7 +41,8 @@ class LoginDialog(QDialog):
         self.error_label.setWordWrap(True)
         self.error_label.hide()
         layout.addWidget(self.error_label)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        # Parented to the dialog before setDefault, or Qt makes Cancel the Enter key's button.
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel, self)
         self.switch_button = buttons.addButton("Create account", QDialogButtonBox.ButtonRole.ActionRole)
         self.switch_button.setAutoDefault(False)
         self.switch_button.clicked.connect(self.toggle_mode)

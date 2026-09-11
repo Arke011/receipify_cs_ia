@@ -32,7 +32,7 @@ def test_empty_summary():
     assert summary.deadlines == []
 
 
-def test_deadline_review_retains_expired_today_and_day_30():
+def test_deadline_review_excludes_expired_and_keeps_today_and_day_30():
     today = date(2026, 9, 10)
     purchased = (today - timedelta(days=100)).isoformat()
     receipts = [receipt(purchased, warranty_days=days) for days in [131, 130, 99, 100, 105]]
@@ -41,7 +41,7 @@ def test_deadline_review_retains_expired_today_and_day_30():
     assert summary.active_warranties == 4
     assert summary.expired_warranties == 1
     assert [(item.period_name, item.days_remaining) for item in summary.deadlines] == [
-        ("Warranty", -1), ("Warranty", 0), ("Return", 2), ("Warranty", 5), ("Warranty", 30),
+        ("Warranty", 0), ("Return", 2), ("Warranty", 5), ("Warranty", 30),
     ]
 
 
