@@ -56,10 +56,12 @@ def test_unambiguous_day_first_date_and_conflicting_totals():
     assert result.total_cents is None
 
 
-def test_foreign_currency_and_negative_prices_are_not_filled():
+def test_foreign_currency_prices_are_filled_with_a_warning_and_refunds_are_not():
     result = parse_receipt_text("SHOP\nMouse $24.99\nTOTAL USD 24.99")
-    assert result.total_cents is None
-    assert result.items == []
+    assert result.total_cents == 2499
+    assert result.items == [("Mouse", 2499)]
+    assert any("not in euros" in note for note in result.notes)
+    assert not any("not in euros" in note for note in parse_receipt_text("SHOP\nMouse €24.99").notes)
     assert parse_receipt_text("Returned Mouse -24.99").items == []
 
 
@@ -361,3 +363,15 @@ def test_chosen_date_candidate_is_returned(qapp, tmp_path):
     dialog.use_result()
     assert dialog.values["purchase_date"] == "2026-02-20"
     dialog.close()
+
+
+def test_spelled_out_month_dates_are_read():
+    today = date(2026, 9, 11)
+    for text in ("Date April 8, 2025, 3:30 PM", "8 April 2025", "Apr 8th 2025", "8 apr. 2025"):
+        assert parse_receipt_text(text, today=today).purchase_date == "2025-04-08", text
+    assert parse_receipt_text("December 1, 2026", today=today).purchase_date == ""
+
+
+def test_quantity_suffix_and_currency_sign_are_trimmed_from_product_names():
+    result = parse_receipt_text("SHOP\nMinimalist T-Shirt x1 €25.00\nThinkPad X1 1299,00\nTotal €1 324,00")
+    assert result.items == [("Minimalist T-Shirt", 2500), ("ThinkPad X1", 129900)]

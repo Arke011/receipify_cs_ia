@@ -37,6 +37,14 @@ PAGE_MODES = ("4", "6")
 # "Pardavimas 159,99 EUR" labels the sale amount, so it is a total, not a product.
 TOTAL = re.compile(r"\b(?:grand total|total due|amount due|total|is viso|viso|moketi|suma|pardavimas|pirkimas)\b")
 QUANTITY = re.compile(r"\s*\b\d+(?:[.,]\d+)?\s*(?:vnt|kg|g|l|ml|pcs?)?\s*[x×*]\s*$", re.IGNORECASE)
+# Lower-case "x1" after a name is a quantity; "ThinkPad X1" is a model and is kept.
+QUANTITY_SUFFIX = re.compile(r"\s+[x×]\s?\d{1,3}$")
+MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+MONTH_NAME = r"(?P<month>jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?"
+NAMED_DATES = (
+    re.compile(rf"\b{MONTH_NAME}\s+(?P<day>\d{{1,2}})(?:st|nd|rd|th)?,?\s+(?P<year>\d{{4}})\b", re.IGNORECASE),
+    re.compile(rf"\b(?P<day>\d{{1,2}})(?:st|nd|rd|th)?\s+{MONTH_NAME},?\s+(?P<year>\d{{4}})\b", re.IGNORECASE),
+)
 # "2 x 1,29   2,58" continues the product named on the line above; a lone amount does not.
 CONTINUATION = re.compile(r"\b\d+(?:[.,]\d+)?\s*(?:vnt|kg|g|l|ml|pcs?)?\s*[x×*]", re.IGNORECASE)
 # Serial numbers and reference codes are not shop names.
@@ -225,6 +233,15 @@ def parse_receipt_text(text, today=None):
                 dates.add(value.isoformat())
         except ValueError:
             pass
+    # A spelled-out month is never ambiguous: "April 8, 2025" or "8 April 2025".
+    for pattern in NAMED_DATES:
+        for match in pattern.finditer(text):
+            try:
+                value = date(int(match["year"]), MONTHS.index(match["month"][:3].lower()) + 1, int(match["day"]))
+            except ValueError:
+                continue
+            if value <= today:
+                dates.add(value.isoformat())
     # Keep every candidate: a misread year turns one printed date into two, and
     # choosing between them is the reader's job, not a guess this parser may make.
     result.dates = sorted(dates)
@@ -267,7 +284,9 @@ def parse_receipt_text(text, today=None):
             continue
         if NON_ITEM.search(folded) or re.search(r"\d{4}[-/.]\d{2}", line[:amounts[0].start()]):
             continue
-        description = QUANTITY.sub("", line[:amounts[0].start()].strip(" .:-")).strip(" .:-")
+        # "Minimalist T-Shirt x1 $25.00": drop the quantity and the currency sign.
+        description = line[:amounts[0].start()].strip(" .:-$£€")
+        description = QUANTITY_SUFFIX.sub("", QUANTITY.sub("", description)).strip(" .:-$£€")
         if sum(c.isalpha() for c in description) < 3:
             # Only a quantity line continues the name above it. A bare amount on
             # its own line is usually a total restated under a notice or heading.
@@ -280,7 +299,8 @@ def parse_receipt_text(text, today=None):
         result.notes.append("Several totals were found; verify the price manually.")
     result.notes.insert(0, "Check every suggestion. OCR can misread names, dates, and prices.")
     if re.search(r"[$£]|\b(?:USD|GBP)\b", text, re.IGNORECASE):
-        result.items.clear()
-        result.total_cents = None
-        result.notes.append("A non-EUR currency was detected. Enter the EUR price manually.")
+        # Receipify stores euros only. The printed figures are still offered, so the
+        # reader converts one pre-filled price instead of retyping it.
+        result.notes.append("This receipt is not in euros. The amounts below are the printed "
+                            "$ or £ figures: convert the price before saving.")
     return result

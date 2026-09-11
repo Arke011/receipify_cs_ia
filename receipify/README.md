@@ -129,7 +129,8 @@ orientation is honored and metadata is removed from uploaded copies.
 OCR supplies suggestions, not verified purchase data. Ambiguous dates and
 conflicting totals are left unset. Quantity columns (`2 x 1,29  2,58`) and
 descriptions wrapped onto a second line are read; discounts, unusual layouts,
-and faded print may still need manual entry. Detected USD/GBP amounts are not used as EUR prices.
+and faded print may still need manual entry. Dollar and pound amounts are filled in as printed, with a warning to convert
+them before saving, because Receipify stores euros only.
 Warranty/return terms and categories are not inferred. All receipt validation
 still runs on Save. If the OCR engine is missing or reading fails, **Use photo
 only** still lets you attach the image and enter details manually.
