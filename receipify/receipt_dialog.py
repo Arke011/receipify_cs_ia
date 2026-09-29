@@ -1,9 +1,8 @@
 """The form for adding a new receipt or editing an existing one."""
 
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFontMetrics, QPixmap
 from PyQt6.QtWidgets import (
     QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel,
@@ -12,9 +11,8 @@ from PyQt6.QtWidgets import (
 
 from images import copy_image
 from receipt import validate_receipt
-from scan_dialog import ScanDialog
 
-# Field key (as used by validate_receipt and the scan dialog) -> label, example text.
+# Field key (as used by validate_receipt) -> label, example text.
 FIELDS = {
     "product": ("Product name", "Wireless Mouse"),
     "merchant": ("Store / merchant", "Tech Store"),
@@ -63,8 +61,7 @@ class ReceiptDialog(QDialog):
         self.receipt = receipt
         self.values = {}  # the validated receipt, ready to save, once the dialog is accepted
         self.image_path = receipt.image_path if receipt else None  # the image already saved with the receipt
-        self.new_image = None  # an image chosen or scanned in this dialog; copied when saved
-        self.scan_folder = None  # temporary folder for phone photos, deleted when the dialog closes
+        self.new_image = None  # an image chosen in this dialog; copied when saved
         self.setWindowTitle("Edit Receipt" if receipt else "New Receipt")
         self.setMinimumWidth(480)
 
@@ -115,32 +112,14 @@ class ReceiptDialog(QDialog):
         text_column.addWidget(self.image_name)
         text_column.addWidget(self.image_folder)
         row.addLayout(text_column, stretch=1)
-        self.scan_button = QPushButton("Scan")
-        self.scan_button.clicked.connect(self.scan)
         self.choose_button = QPushButton("Choose file")
         self.choose_button.clicked.connect(self.choose_image)
         self.remove_button = QPushButton("Remove")
         self.remove_button.clicked.connect(self.remove_image)
-        for button in (self.scan_button, self.choose_button, self.remove_button):
+        for button in (self.choose_button, self.remove_button):
             button.setAutoDefault(False)  # so Enter always means Save
             row.addWidget(button)
         return self.image_row
-
-    def scan(self):
-        if self.scan_folder is None:
-            self.scan_folder = TemporaryDirectory(prefix="receipify-capture-")
-        dialog = ScanDialog(self.scan_folder.name, self.new_image or self.image_path, parent=self)
-        QTimer.singleShot(0, dialog.start)  # start once the dialog is on screen
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            # Scanning the image that is already saved needs no new copy.
-            is_saved_image = self.image_path and Path(dialog.image_path) == Path(self.image_path).resolve()
-            self.new_image = None if is_saved_image else dialog.image_path
-            self.update_image()
-            # Scanned details only fill empty fields; anything typed is kept.
-            for key, value in dialog.values.items():
-                if value and not self.fields[key].text().strip():
-                    self.fields[key].setText(value)
-        dialog.deleteLater()
 
     def choose_image(self):
         path, _ = QFileDialog.getOpenFileName(self, "Choose receipt image", "",
@@ -196,11 +175,3 @@ class ReceiptDialog(QDialog):
     def show_error(self, message):
         self.error_label.setText(message)
         self.error_label.show()
-
-    def done(self, result):
-        for scan in self.findChildren(QDialog):
-            scan.reject()  # stops a phone upload that is still waiting
-        if self.scan_folder is not None:
-            self.scan_folder.cleanup()  # deletes phone photos that were not saved
-            self.scan_folder = None
-        super().done(result)

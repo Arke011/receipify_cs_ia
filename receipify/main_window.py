@@ -198,7 +198,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         for dialog in self.findChildren(QDialog):
-            dialog.reject()  # stops any phone upload and deletes temporary photos
+            dialog.reject()  # close any dialog still open
         self.closed.emit()
         super().closeEvent(event)
 

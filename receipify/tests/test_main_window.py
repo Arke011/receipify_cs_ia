@@ -1,14 +1,12 @@
 from datetime import date, timedelta
 from pathlib import Path
 
-import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QDialog, QLabel, QMessageBox
 
 import main_window
-import receipt_dialog
 from browse import DEFAULT_FILTERS
 from database import DEFAULT_SETTINGS
 from receipt_dialog import ReceiptDialog
@@ -52,37 +50,6 @@ def test_edit_form_is_filled_in_and_can_remove_the_image(make_receipt):
     assert dialog.image_name.full_text == "No image attached"
     dialog.save()
     assert dialog.values["image_path"] is None
-
-
-@pytest.mark.parametrize("save", [False, True])
-def test_scanned_details_fill_only_empty_fields_and_phone_photos_are_deleted(monkeypatch, image_dir, save):
-    class AcceptedScan(QDialog):  # stands in for ScanDialog, as if the user chose "Use photo and details"
-        def __init__(self, folder, image_path, parent):
-            super().__init__(parent)
-            self.image_path = str(Path(folder) / "phone.jpg")
-            QPixmap(40, 30).save(self.image_path)
-            self.values = {"merchant": "TECH STORE", "product": "Mouse", "price": "24.99", "purchase_date": "2026-01-15"}
-
-        def start(self):
-            pass
-
-        def exec(self):
-            return QDialog.DialogCode.Accepted
-
-    monkeypatch.setattr(receipt_dialog, "ScanDialog", AcceptedScan)
-    dialog = ReceiptDialog(warranty_days=730, return_days=14)
-    dialog.fields["product"].setText("My chosen product")
-    dialog.scan()
-    assert dialog.fields["merchant"].text() == "TECH STORE"
-    assert dialog.fields["product"].text() == "My chosen product"  # typed text is kept
-    assert dialog.fields["warranty_days"].text() == "730"
-    phone_photo = Path(dialog.new_image)
-    if save:
-        dialog.save()
-        assert Path(dialog.values["image_path"]).parent == image_dir.resolve()
-    else:
-        dialog.reject()
-    assert not phone_photo.exists()
 
 
 # ---- the Receipts tab
