@@ -1,0 +1,3 @@
+.DS_Store
+# Database from an early version; the app now keeps its data in the per-user application folder.
+/data/

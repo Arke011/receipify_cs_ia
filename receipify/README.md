@@ -35,15 +35,24 @@ database.
 
 ## Project structure
 
+All source files sit in one folder. Each file is one feature or one shared rule set.
+
 ```text
-app/
-  data/          SQLite persistence layer
-  models/        Receipt model
-  services/      Validation and expiry calculations
-  ui/            PyQt6 windows, dialogs, and receipt entries
-data/            Local runtime database (not committed)
-tests/           Automated tests
-main.py          Application entry point
+main.py            Entry point; switches between the login dialog and the main window
+database.py        SQLite storage (accounts, receipts, settings) and password hashing
+receipt.py         Receipt record; date/price parsing, expiry status, form validation
+images.py          Copies receipt photos into Receipify's own folder
+login.py           Login / create-account dialog and username/password rules
+main_window.py     Main window: the Receipts tab, receipt cards, image viewer
+receipt_dialog.py  Add/edit receipt form
+browse.py          Search, filter and sort rules, and the Filters dialog
+dashboard.py       Dashboard figures, spending chart and Dashboard tab
+export.py          CSV/JSON export and the Export tab
+settings.py        Settings validation and the Settings tab
+scan_dialog.py     Scan dialog: phone QR code, OCR in the background, review
+ocr.py             Tesseract OCR and the receipt text parser
+phone_upload.py    One-photo local web server for the phone (serves phone_upload.html)
+tests/             Automated tests
 ```
 
 ## Current scope
@@ -108,8 +117,9 @@ cleans temporary photos. No database or receipt gallery is accessible to the pho
 The phone connection uses **unencrypted local HTTP**, so use trusted Wi-Fi and
 do not expose or forward the port to the internet.
 
-If the phone cannot connect, select the correct Wi-Fi/Ethernet address in the
-scan dialog. Windows may require allowing Receipify/Python through the firewall
+If the phone cannot connect, check that the computer's Wi-Fi/Ethernet is the
+same network as the phone (Receipify uses the computer's first private network
+address). Windows may require allowing Receipify/Python through the firewall
 on a **Private** network. Guest/school Wi-Fi may isolate devices; use another
 trusted network or transfer the photo manually. The phone cannot use mobile
 data alone to reach the computer. Camera/file-picker behavior depends on the
